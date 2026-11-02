@@ -1,0 +1,7 @@
+# Private Zugangsdaten, Tokens und lokale Logs NIEMALS committen!
+.corsa_tokens.json
+.wallbox_telegram.json
+*.log
+__pycache__/
+*.pyc
+.env
