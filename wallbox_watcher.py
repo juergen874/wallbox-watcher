@@ -41,6 +41,7 @@ except ImportError:
 
 CONFIG_FILE = os.path.expanduser("~/.wallbox_telegram.json")
 WB_HOST = "192.168.188.130"
+WB_SERIAL = 1221073414
 INV_HOST = "192.168.188.128"
 INV_SERIAL = 1109501211
 TARGET_SOC = 66.0
@@ -365,13 +366,15 @@ def set_wallbox_charge_power(watts):
     """Setzt die Ladeleistungsgrenze der Deye-Wallbox direkt per Modbus TCP Port 8899 (Slave 3, Reg 18)."""
     if not HAS_SOLARMAN:
         return False
-    try:
-        c = PySolarmanV5(WB_HOST, WB_SERIAL, port=8899, mb_slave_id=3, timeout=5.0, verbose=False)
-        c.write_multiple_holding_registers(18, [int(watts)])
-        c.disconnect()
-        return True
-    except Exception as e:
-        return False
+    for attempt in range(2):
+        try:
+            c = PySolarmanV5(WB_HOST, WB_SERIAL, port=8899, mb_slave_id=3, timeout=5.0, verbose=False)
+            c.write_multiple_holding_registers(18, [int(watts)])
+            c.disconnect()
+            return True
+        except Exception as e:
+            time.sleep(0.5)
+    return False
 
 def async_execute_pause(user):
     ok = set_wallbox_charge_power(0)
