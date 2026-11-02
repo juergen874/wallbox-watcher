@@ -1,13 +1,13 @@
 # ⚡ Deye Wallbox & Inverter Watcher Suite
 
-[![Release](https://img.shields.io/badge/release-v1.1-blue.svg)](https://github.com/juergen874/wallbox-watcher/releases)
+[![Release](https://img.shields.io/badge/release-v1.2-blue.svg)](https://github.com/juergen874/wallbox-watcher/releases)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8%2B-green.svg)](https://www.python.org/)
 [![Platform Termux/Linux](https://img.shields.io/badge/platform-Termux%20%7C%20Linux-orange.svg)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Eine modulare Python-Suite zur Überwachung, Regelung und Fernsteuerung von:
-- **Deye Smart EV Wallbox** (192.168.188.130)
-- **Deye SUN-12K-SG04LP3 Hybrid-Wechselrichter** (192.168.188.128 via Solarman V5 / Modbus TCP Port 8899)
+- **Deye Smart EV Wallbox** (192.168.188.130 via Modbus TCP Port 8899, Slave 3 / Register 18 & Web-Telemetrie)
+- **Deye SUN-12K-SG04LP3 Hybrid-Wechselrichter** (192.168.188.128 via Solarman V5 / Modbus TCP Port 8899, Slave 1)
 - **Opel Corsa Electric** (SoC- & Ladeüberwachung über die offizielle Stellantis / Opel API)
 - **Telegram Bot** mit interaktiven Inline-Buttons & Sonnenschein-Vorhersage für Zellertal
 
@@ -24,12 +24,11 @@ Eine modulare Python-Suite zur Überwachung, Regelung und Fernsteuerung von:
   - **$\ge$ 85% Speicher:** Automatische Empfehlung zum Starten des Ladens, um reichlich PV-Überschuss direkt ins Auto zu laden.
 - 🌤️ **Sonnenschein-Vorhersage (Zellertal):**  
   Tägliche Abfrage der erwarteten Sonnenstunden der nächsten 3 Tage über die Open-Meteo-API.
-- 🔘 **Interaktive Telegram-Buttons:**  
-  Direkte Steuerung und Statusabfrage via Inline-Tastatur:
-  ```text
-  [ ▶️ Laden starten ]  [ ⏸️ Laden pausieren ]
-  [ 📊 Status aktualisieren ]
-  ```
+- 🔘 **Direkte Hardware-Steuerung via Telegram:**  
+  Echte Leistungsregelung der Wallbox über Modbus TCP (Port 8899, Slave 3, Register 18):
+  - `[ ⏸️ Laden pausieren ]`: Setzt Ladelimit sofort auf `0 W` (stoppt Stromabgabe).
+  - `[ ▶️ Laden starten ]`: Setzt Ladelimit auf `15.000 W` zurück (gibt Laden frei).
+  - `[ 📊 Status aktualisieren ]`: Fragt Wallbox, Inverter, Fahrzeug und Wetter live ab.
 - 🛡️ **Verbindungs- und API-Schutz:**  
   - Asynchrone Button-Quittierung (verhindert das Einfrieren der Telegram-App).
   - Automatischer Retry-Mechanismus und Socket-Bereinigung (`disconnect()`) für den Deye-Modbus-Port 8899.

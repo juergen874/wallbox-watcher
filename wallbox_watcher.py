@@ -360,6 +360,51 @@ def async_reply_status():
     msg = format_full_status_message("📊 *Aktualisierter Status*")
     send_telegram(msg, reply_markup=get_inline_keyboard())
 
+
+def set_wallbox_charge_power(watts):
+    """Setzt die Ladeleistungsgrenze der Deye-Wallbox direkt per Modbus TCP Port 8899 (Slave 3, Reg 18)."""
+    if not HAS_SOLARMAN:
+        return False
+    try:
+        c = PySolarmanV5(WB_HOST, WB_SERIAL, port=8899, mb_slave_id=3, timeout=5.0, verbose=False)
+        c.write_multiple_holding_registers(18, [int(watts)])
+        c.disconnect()
+        return True
+    except Exception as e:
+        return False
+
+def async_execute_pause(user):
+    ok = set_wallbox_charge_power(0)
+    time.sleep(1)
+    status_text = format_full_status_message()
+    if ok:
+        send_telegram(
+            f"⏸️ *Ladung von {user} erfolgreich pausiert!*\n"
+            "⚡ Die Ladeleistung der Wallbox wurde über Modbus auf *0 W* gesetzt.",
+            reply_markup=get_inline_keyboard()
+        )
+    else:
+        send_telegram(
+            f"⚠️ *Pause-Befehl von {user}:* Fehler bei der Modbus-Übertragung an die Wallbox.",
+            reply_markup=get_inline_keyboard()
+        )
+
+def async_execute_start(user):
+    ok = set_wallbox_charge_power(15000)
+    time.sleep(1)
+    status_text = format_full_status_message()
+    if ok:
+        send_telegram(
+            f"▶️ *Ladung von {user} erfolgreich gestartet / freigegeben!*\n"
+            "⚡ Die Wallbox wurde über Modbus auf *15.0 kW* freigegeben.",
+            reply_markup=get_inline_keyboard()
+        )
+    else:
+        send_telegram(
+            f"⚠️ *Start-Befehl von {user}:* Fehler bei der Modbus-Übertragung an die Wallbox.",
+            reply_markup=get_inline_keyboard()
+        )
+
 def handle_telegram_updates():
     """Hintergrund-Thread: Hört auf Button-Klicks und Befehle via Long-Polling."""
     offset = 0
@@ -383,20 +428,12 @@ def handle_telegram_updates():
                             threading.Thread(target=async_reply_status, daemon=True).start()
 
                         elif data == "start":
-                            answer_callback(cb_id, "Ladefreigabe aktiv!")
-                            send_telegram(
-                                f"▶️ *Ladefreigabe von {user} erteilt!*\n"
-                                "⚡ Die Wallbox ist empfangsbereit für die Ladung.",
-                                reply_markup=get_inline_keyboard()
-                            )
+                            answer_callback(cb_id, "Starte Ladung...")
+                            threading.Thread(target=async_execute_start, args=(user,), daemon=True).start()
 
                         elif data == "pause":
-                            answer_callback(cb_id, "Pause-Befehl verarbeitet...")
-                            send_telegram(
-                                f"⏸️ *Pause-Befehl von {user} empfangen!*\n"
-                                "ℹ️ _Hinweis: Die Ladung wird angehalten._",
-                                reply_markup=get_inline_keyboard()
-                            )
+                            answer_callback(cb_id, "Pausiere Ladung...")
+                            threading.Thread(target=async_execute_pause, args=(user,), daemon=True).start()
 
                     elif "message" in update:
                         msg = update["message"]
