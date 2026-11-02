@@ -529,32 +529,39 @@ def monitor_wallbox_and_battery_loop():
                 send_telegram("⏸️ *Ladevorgang an der Wallbox beendet / pausiert.*", reply_markup=get_inline_keyboard())
 
             # 3. Automatische Re-Aktivierung auf 15 kW bei Stecker-Reset
-            # Wenn manuell pausiert wurde (WALLBOX_PAUSED_BY_USER oder Ladelimit == 0 W):
-            # - Sobald Stecker abgezogen wird -> setze Ladelimit sofort automatisch wieder auf 15 kW!
-            is_plugged = wb.get("plugged", True)
+            # Wenn Ladelimit == 0 W (z.B. nach Druck auf Pause) und das Kabel abgezogen ist:
+            # Sobald das Kabel ausgesteckt ist (oder gerade abgezogen wird), wird automatisch wieder auf 15 kW gesetzt!
+            is_plugged = wb.get("plugged", False)
+
             if last_plug_state is None:
+                # Beim allerersten Start merken wir uns den aktuellen Zustand
                 last_plug_state = is_plugged
 
-            if last_plug_state and not is_plugged:
-                # Stecker wurde gerade abgezogen
-                print(f"[{datetime.now().strftime('%H:%M:%S')}] 🔌 Ladekabel am Fahrzeug abgezogen.")
+            # Fall A: Kabel wurde während des Betriebs abgezogen (Zustandswechsel True -> False)
+            # Fall B: Kabel ist bereits ausgesteckt, aber Ladelimit steht noch auf 0 W (z.B. nach Neustart oder verpasstem Event)
+            limit = wb.get("limit_w", 15000)
+            cable_just_unplugged = (last_plug_state is True and is_plugged is False)
+            unplugged_with_zero_limit = (is_plugged is False and limit == 0)
+
+            if cable_just_unplugged or unplugged_with_zero_limit:
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] 🔌 Ladekabel abgezogen (Limit: {limit} W) -> Setze Ladelimit auf 15 kW zurück!")
                 last_plug_state = False
-                if WALLBOX_PAUSED_BY_USER or wb.get("limit_w", 15000) == 0:
-                    print("⚡ Pausierte Wallbox erkannt: Setze Ladeleistung beim Abziehen direkt auf 15 kW zurück...")
-                    WALLBOX_PAUSED_BY_USER = False
-                    ok = set_wallbox_charge_power(15000)
-                    time.sleep(1)
-                    if ok:
-                        send_telegram(
-                            "🔌 *Ladekabel abgezogen!*\n"
-                            "⚡ Die Wallbox wurde für die nächste Ladung automatisch wieder auf *15.0 kW* freigegeben.",
-                            reply_markup=get_inline_keyboard()
-                        )
+                WALLBOX_PAUSED_BY_USER = False
+                ok = set_wallbox_charge_power(15000)
+                time.sleep(1)
+                if ok:
+                    send_telegram(
+                        "🔌 *Ladekabel abgezogen!*\n"
+                        "⚡ Die Wallbox wurde für die nächste Ladung automatisch wieder auf *15.0 kW* freigegeben.",
+                        reply_markup=get_inline_keyboard()
+                    )
 
             elif not last_plug_state and is_plugged:
-                # Stecker wurde wieder angesteckt
-                print(f"[{datetime.now().strftime('%H:%M:%S')}] 🔌 Ladekabel eingesteckt.")
+                # Kabel wurde frisch angesteckt
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] 🔌 Ladekabel am Fahrzeug eingesteckt.")
                 last_plug_state = True
+
+            last_plug_state = is_plugged
 
         except Exception:
             pass
