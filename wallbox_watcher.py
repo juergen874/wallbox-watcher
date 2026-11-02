@@ -63,6 +63,9 @@ WEATHER_CACHE_TTL = 3600  # Stündlich aktualisieren
 NOTIFIED_SOC_30 = False
 NOTIFIED_SOC_85 = False
 
+# Merker für manuell pausierte Wallbox (wird bei Stecker-Trennung und Neu-Anstecken zurückgesetzt)
+WALLBOX_PAUSED_BY_USER = False
+
 def load_config():
     if os.path.exists(CONFIG_FILE):
         try:
@@ -166,7 +169,7 @@ def get_wallbox_telemetry():
     req = urllib.request.Request(url)
     auth = base64.b64encode(b"admin:admin").decode("utf-8")
     req.add_header("Authorization", f"Basic {auth}")
-    data = {"online": False, "total_w": 0.0, "p1": 0.0, "p2": 0.0, "p3": 0.0, "limit_w": 15000}
+    data = {"online": False, "total_w": 0.0, "p1": 0.0, "p2": 0.0, "p3": 0.0, "limit_w": 15000, "plugged": False}
     try:
         with urllib.request.urlopen(req, timeout=2.5) as resp:
             html = resp.read().decode("utf-8", errors="ignore")
@@ -182,6 +185,21 @@ def get_wallbox_telemetry():
             })
     except Exception:
         pass
+
+    # Prüfe den physischen Kabel-Status (Register 57) direkt per Modbus TCP
+    if HAS_SOLARMAN and data["online"]:
+        try:
+            c = PySolarmanV5(WB_HOST, WB_SERIAL, port=8899, mb_slave_id=3, timeout=2.5, verbose=False)
+            reg57 = c.read_holding_registers(57, 1)[0]
+            c.disconnect()
+            # Register 57:
+            # 641 = Unplugged (Stecker gezogen / kein CP)
+            # 416 = Plugged / Ready / Charging (Stecker gesteckt)
+            data["plugged"] = (reg57 != 641)
+        except Exception:
+            # Fallback: Wenn Leistung fließt, muss es gesteckt sein
+            if data["total_w"] > 500:
+                data["plugged"] = True
     return data
 
 def get_corsa_status(force_refresh=False):
@@ -377,13 +395,16 @@ def set_wallbox_charge_power(watts):
     return False
 
 def async_execute_pause(user):
+    global WALLBOX_PAUSED_BY_USER
     ok = set_wallbox_charge_power(0)
     time.sleep(1)
     status_text = format_full_status_message()
     if ok:
+        WALLBOX_PAUSED_BY_USER = True
         send_telegram(
             f"⏸️ *Ladung von {user} erfolgreich pausiert!*\n"
-            "⚡ Die Ladeleistung der Wallbox wurde über Modbus auf *0 W* gesetzt.",
+            "⚡ Die Ladeleistung der Wallbox wurde über Modbus auf *0 W* gesetzt.\n\n"
+            "ℹ️ _Sobald das Ladekabel ausgesteckt und wieder eingesteckt wird, lädt die Wallbox automatisch wieder mit 15 kW._",
             reply_markup=get_inline_keyboard()
         )
     else:
@@ -393,10 +414,12 @@ def async_execute_pause(user):
         )
 
 def async_execute_start(user):
+    global WALLBOX_PAUSED_BY_USER
     ok = set_wallbox_charge_power(15000)
     time.sleep(1)
     status_text = format_full_status_message()
     if ok:
+        WALLBOX_PAUSED_BY_USER = False
         send_telegram(
             f"▶️ *Ladung von {user} erfolgreich gestartet / freigegeben!*\n"
             "⚡ Die Wallbox wurde über Modbus auf *15.0 kW* freigegeben.",
@@ -453,6 +476,7 @@ def monitor_wallbox_and_battery_loop():
     global NOTIFIED_SOC_30, NOTIFIED_SOC_85
     print(f"[{datetime.now().strftime('%H:%M:%S')}] Wallbox & Batterie Watcher aktiv. Überwache {WB_HOST} & {INV_HOST}...")
     is_charging_session = False
+    last_plug_state = None
 
     while True:
         try:
@@ -503,6 +527,35 @@ def monitor_wallbox_and_battery_loop():
                 is_charging_session = False
                 print(f"[{datetime.now().strftime('%H:%M:%S')}] Ladevorgang beendet.")
                 send_telegram("⏸️ *Ladevorgang an der Wallbox beendet / pausiert.*", reply_markup=get_inline_keyboard())
+
+            # 3. Automatische Re-Aktivierung auf 15 kW bei Stecker-Reset
+            # Wenn manuell pausiert wurde (WALLBOX_PAUSED_BY_USER oder Ladelimit == 0 W):
+            # - Sobald Stecker abgezogen wird -> erkenne un-plugged
+            # - Sobald Stecker wieder eingesteckt wird -> setze Ladelimit automatisch wieder auf 15 kW!
+            is_plugged = wb.get("plugged", True)
+            if last_plug_state is None:
+                last_plug_state = is_plugged
+
+            if last_plug_state and not is_plugged:
+                # Stecker wurde gerade abgezogen
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] 🔌 Ladekabel am Fahrzeug abgezogen.")
+                last_plug_state = False
+
+            elif not last_plug_state and is_plugged:
+                # Stecker wurde gerade frisch wieder angesteckt
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] 🔌 Ladekabel frisch eingesteckt!")
+                last_plug_state = True
+                if WALLBOX_PAUSED_BY_USER or wb.get("limit_w", 15000) == 0:
+                    print("⚡ Pausierte Wallbox erkannt: Setze Ladeleistung automatisch auf 15 kW zurück...")
+                    WALLBOX_PAUSED_BY_USER = False
+                    ok = set_wallbox_charge_power(15000)
+                    time.sleep(1)
+                    if ok:
+                        send_telegram(
+                            "🔌 *Ladekabel neu angesteckt!*\n"
+                            "⚡ Die Wallbox wurde automatisch wieder auf *15.0 kW* freigegeben.",
+                            reply_markup=get_inline_keyboard()
+                        )
 
         except Exception:
             pass

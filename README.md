@@ -29,6 +29,8 @@ Eine modulare Python-Suite zur Überwachung, Regelung und Fernsteuerung von:
   - `[ ⏸️ Laden pausieren ]`: Setzt Ladelimit sofort auf `0 W` (stoppt Stromabgabe).
   - `[ ▶️ Laden starten ]`: Setzt Ladelimit auf `15.000 W` zurück (gibt Laden frei).
   - `[ 📊 Status aktualisieren ]`: Fragt Wallbox, Inverter, Fahrzeug und Wetter live ab.
+- 🔌 **Automatischer Stecker-Reset (Auto-Resume auf 15 kW):**  
+  Wird die Wallbox manuell pausiert (0 W), erkennt der Dienst über die Control-Pilot-Telemetrie (Register 57), wenn das Ladekabel am Fahrzeug abgezogen und erneut angesteckt wird. Das Ladelimit wird daraufhin vollautomatisch wieder auf **15.0 kW** freigegeben und eine Bestätigung an Telegram gesendet.
 - 🛡️ **Verbindungs- und API-Schutz:**  
   - Asynchrone Button-Quittierung (verhindert das Einfrieren der Telegram-App).
   - Automatischer Retry-Mechanismus und Socket-Bereinigung (`disconnect()`) für den Deye-Modbus-Port 8899.
