@@ -173,29 +173,30 @@ def get_wallbox_telemetry():
     auth = base64.b64encode(b"admin:admin").decode("utf-8")
     req.add_header("Authorization", f"Basic {auth}")
     data = {"online": False, "total_w": 0.0, "p1": 0.0, "p2": 0.0, "p3": 0.0, "limit_w": 15000, "plugged": False}
-    try:
-        with urllib.request.urlopen(req, timeout=2.5) as resp:
-            html = resp.read().decode("utf-8", errors="ignore")
-            p1 = float(re.search(r'var webdata_power1\s*=\s*"([0-9.]+)"', html).group(1))
-            p2 = float(re.search(r'var webdata_power2\s*=\s*"([0-9.]+)"', html).group(1))
-            p3 = float(re.search(r'var webdata_power3\s*=\s*"([0-9.]+)"', html).group(1))
-            # Wenn Ladevorgang aktiv ist (Strom fließt auf der Wallbox > 50W):
-            # Da das Fahrzeug 1-phasig ist und die Wallbox auf 15 kW begrenzt ist,
-            # zieht das Fahrzeug exakt 1/3 = 5.0 kW (wie am Deye-Wechselrichter abgelesen).
-            raw_w = p1 + p2 + p3
-            if raw_w > 50:
-                real_total_w = FIXED_1P_CHARGING_POWER_W if CHARGING_PHASES == 1 else raw_w
-            else:
-                real_total_w = 0.0
 
-            data.update({
-                "online": True,
-                "total_w": real_total_w,
-                "p1": p1, "p2": p2, "p3": p3,
-                "limit_w": ch
-            })
-    except Exception:
-        pass
+    for attempt in range(2):
+        try:
+            with urllib.request.urlopen(req, timeout=3.5) as resp:
+                html = resp.read().decode("utf-8", errors="ignore")
+                p1 = float(re.search(r'var webdata_power1\s*=\s*"([0-9.]+)"', html).group(1))
+                p2 = float(re.search(r'var webdata_power2\s*=\s*"([0-9.]+)"', html).group(1))
+                p3 = float(re.search(r'var webdata_power3\s*=\s*"([0-9.]+)"', html).group(1))
+                raw_w = p1 + p2 + p3
+                if raw_w > 50:
+                    real_total_w = FIXED_1P_CHARGING_POWER_W if CHARGING_PHASES == 1 else raw_w
+                else:
+                    real_total_w = 0.0
+
+                data.update({
+                    "online": True,
+                    "total_w": real_total_w,
+                    "p1": p1, "p2": p2, "p3": p3,
+                })
+                break
+        except Exception:
+            if attempt == 0:
+                time.sleep(0.4)
+            pass
 
     # Prüfe den physischen Kabel-Status (Register 57) direkt per Modbus TCP
     if HAS_SOLARMAN and data["online"]:
