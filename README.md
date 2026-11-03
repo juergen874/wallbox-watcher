@@ -83,6 +83,19 @@ Start- und Watchdog-Skript für Termux. Aktiviert `termux-wake-lock`, beendet al
 
 ---
 
+## 📚 Ausführliche Dokumentationen / Detailed Documentation
+
+Für jede einzelne Komponente steht eine ausführliche Anleitung in **Deutsch** und **Englisch** im Verzeichnis [`docs/`](docs/) zur Verfügung:
+
+| Komponente | Deutsch (DE) | English (EN) |
+| :--- | :--- | :--- |
+| **Deye Reader** | [📖 DEYE_READER_DE.md](docs/DEYE_READER_DE.md) | [📖 DEYE_READER_EN.md](docs/DEYE_READER_EN.md) |
+| **Corsa Status** | [🚗 CORSA_STATUS_DE.md](docs/CORSA_STATUS_DE.md) | [🚗 CORSA_STATUS_EN.md](docs/CORSA_STATUS_EN.md) |
+| **Deye Wallbox** | [⚡ DEYE_WALLBOX_DE.md](docs/DEYE_WALLBOX_DE.md) | [⚡ DEYE_WALLBOX_EN.md](docs/DEYE_WALLBOX_EN.md) |
+| **Wallbox Watcher** | [🤖 WALLBOX_WATCHER_DE.md](docs/WALLBOX_WATCHER_DE.md) | [🤖 WALLBOX_WATCHER_EN.md](docs/WALLBOX_WATCHER_EN.md) |
+
+---
+
 ## 🛠️ Voraussetzungen & Installation
 
 ### 1. Abhängigkeiten installieren
