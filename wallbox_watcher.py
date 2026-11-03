@@ -614,44 +614,34 @@ def monitor_wallbox_and_battery_loop():
                 send_telegram("⏸️ *Ladevorgang an der Wallbox beendet / pausiert.*", reply_markup=get_inline_keyboard())
 
             # 3. Automatische Re-Aktivierung auf 15 kW bei Stecker-Reset
-            # Wenn Ladelimit == 0 W (z.B. nach Druck auf Pause) und das Kabel abgezogen ist:
-            # Sobald das Kabel ausgesteckt ist (oder gerade abgezogen wird), wird automatisch wieder auf 15 kW gesetzt!
-            is_plugged = wb.get("plugged", False)
+            # Wenn der Benutzer zuvor "Pausieren" gedrückt hatte (WALLBOX_PAUSED_BY_USER bzw. limit == 0):
+            # Sobald das Kabel wirklich abgezogen wird (Reg 57 = 641, keine Leistung, mind. 3 Zyklen lang),
+            # wird die Wallbox wieder auf 15 kW freigegeben.
+            reg57 = wb.get("reg57")
+            limit = wb.get("limit_w", 15000)
 
-            if last_plug_state is None:
-                # Beim allerersten Start merken wir uns den aktuellen Zustand
-                last_plug_state = is_plugged
+            # Physisch ausgesteckt ist das Kabel NUR, wenn Reg 57 exakt 641 ist UND keinerlei Strom fließt
+            physical_unplugged = (reg57 == 641 and power_w < 50)
 
-            # Entprellung: Kabel-Abziehen erfordert 2 aufeinanderfolgende negative Messungen,
-            # um Fehlalarme bei minimalen TCP/WLAN-Verzögerungen komplett auszuschließen.
             if not hasattr(monitor_wallbox_and_battery_loop, "unplug_counter"):
                 monitor_wallbox_and_battery_loop.unplug_counter = 0
 
-            limit = wb.get("limit_w", 15000)
-
-            if is_plugged:
-                monitor_wallbox_and_battery_loop.unplug_counter = 0
-                if last_plug_state is False:
-                    print(f"[{datetime.now().strftime('%H:%M:%S')}] 🔌 Ladekabel am Fahrzeug eingesteckt.")
-                last_plug_state = True
-            else:
+            if physical_unplugged:
                 monitor_wallbox_and_battery_loop.unplug_counter += 1
-
-            # Erst wenn mindestens 2 Zyklen lang (mind. 20 Sekunden) das Kabel wirklich unbestreitbar ausgesteckt ist:
-            cable_confirmed_unplugged = (last_plug_state is True and monitor_wallbox_and_battery_loop.unplug_counter >= 2)
-            unplugged_with_zero_limit = (last_plug_state is not False and monitor_wallbox_and_battery_loop.unplug_counter >= 2 and limit == 0)
-
-            if cable_confirmed_unplugged or unplugged_with_zero_limit:
-                print(f"[{datetime.now().strftime('%H:%M:%S')}] 🔌 Ladekabel bestätigt abgezogen (Limit: {limit} W) -> Setze Ladelimit auf 15 kW zurück!")
-                last_plug_state = False
+            else:
                 monitor_wallbox_and_battery_loop.unplug_counter = 0
+
+            # Nur wenn die Wallbox zuvor auf Pause (0 W) gesetzt war UND das Kabel mind. 30 Sekunden lang ausgesteckt ist:
+            if (WALLBOX_PAUSED_BY_USER or limit == 0) and monitor_wallbox_and_battery_loop.unplug_counter >= 3:
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] 🔌 Ladekabel physisch abgezogen -> Setze Ladelimit auf 15 kW zurück!")
                 WALLBOX_PAUSED_BY_USER = False
+                monitor_wallbox_and_battery_loop.unplug_counter = 0
                 ok = set_wallbox_charge_power(15000)
                 time.sleep(1)
                 if ok:
                     send_telegram(
                         "🔌 *Ladekabel abgezogen!*\n"
-                        "⚡ Die Wallbox wurde für die nächste Ladung automatisch wieder auf *15.0 kW* freigegeben.",
+                        "⚡ Die Wallbox wurde automatisch wieder auf *15.0 kW* freigegeben.",
                         reply_markup=get_inline_keyboard()
                     )
 
