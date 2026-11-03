@@ -172,7 +172,16 @@ def get_wallbox_telemetry():
     req = urllib.request.Request(url)
     auth = base64.b64encode(b"admin:admin").decode("utf-8")
     req.add_header("Authorization", f"Basic {auth}")
-    data = {"online": False, "total_w": 0.0, "p1": 0.0, "p2": 0.0, "p3": 0.0, "limit_w": 15000, "plugged": False}
+    data = {
+        "online": False,
+        "total_w": 0.0,
+        "p1": 0.0,
+        "p2": 0.0,
+        "p3": 0.0,
+        "limit_w": getattr(get_wallbox_telemetry, "_last_limit_w", 15000),
+        "reg57": getattr(get_wallbox_telemetry, "_last_reg57", None),
+        "plugged": getattr(get_wallbox_telemetry, "_last_plugged", True)
+    }
 
     for attempt in range(2):
         try:
@@ -209,15 +218,19 @@ def get_wallbox_telemetry():
             data["reg57"] = reg57
             # Register 57:
             # 641 = Unplugged (Stecker gezogen / kein CP)
-            # 392 oder 416 = Plugged / Ready / Charging (Stecker gesteckt)
+            # 385, 392 oder 416 = Plugged / Ready / Charging (Stecker gesteckt)
             data["plugged"] = (reg57 not in [0, 641])
+            get_wallbox_telemetry._last_limit_w = reg18
+            get_wallbox_telemetry._last_reg57 = reg57
+            get_wallbox_telemetry._last_plugged = data["plugged"]
         except Exception:
             # Bei kurzem Modbus-Timeout oder wenn Leistung fließt:
             if data["total_w"] > 200:
                 data["plugged"] = True
-            elif hasattr(get_wallbox_telemetry, "_last_plugged"):
-                data["plugged"] = get_wallbox_telemetry._last_plugged
-        get_wallbox_telemetry._last_plugged = data["plugged"]
+                data["reg57"] = 416
+            else:
+                data["plugged"] = getattr(get_wallbox_telemetry, "_last_plugged", True)
+                data["reg57"] = getattr(get_wallbox_telemetry, "_last_reg57", None)
     return data
 
 def get_corsa_status(force_refresh=False):
@@ -563,6 +576,7 @@ def monitor_wallbox_and_battery_loop():
     print(f"[{datetime.now().strftime('%H:%M:%S')}] Wallbox & Batterie Watcher aktiv. Überwache {WB_HOST} & {INV_HOST}...")
     is_charging_session = False
     last_plug_state = None
+    unplugged_counter = 0
 
     while True:
         try:
@@ -614,23 +628,36 @@ def monitor_wallbox_and_battery_loop():
                 print(f"[{datetime.now().strftime('%H:%M:%S')}] Ladevorgang beendet.")
                 send_telegram("⏸️ *Ladevorgang an der Wallbox beendet / pausiert.*", reply_markup=get_inline_keyboard())
 
-            # 3. Automatische Re-Aktivierung auf 15 kW bei Stecker-Reset
-            # Wenn der Benutzer zuvor "Pausieren" gedrückt hatte (WALLBOX_PAUSED_BY_USER bzw. limit == 0):
-            # Sobald das Kabel wirklich abgezogen wird (Reg 57 = 641, keine Leistung, mind. 3 Zyklen lang),
-            # Automatische Re-Aktivierung auf 15 kW bei Stecker-Reset
-            # Wenn das Kabel physisch ausgesteckt ist (Reg 57 == 641):
+            # 3. Erkennung "Ladekabel abgezogen" & automatische Re-Aktivierung auf 15 kW
+            # Kabel-Status: wb["plugged"] ist True bei Reg 57 in [385, 392, 416] oder wenn Leistung > 200 W fließt.
+            # Reg 57 == 641 bedeutet Stecker gezogen / CP offen.
             reg57 = wb.get("reg57")
             limit = wb.get("limit_w", 15000)
-            is_unplugged = (reg57 == 641 and power_w < 50)
 
-            # A) Wenn die Wallbox auf 0 W gedrosselt ist und das Kabel ausgesteckt wird:
-            # Sofort automatisch wieder auf 15.0 kW freigeben!
-            if is_unplugged and (limit == 0 or WALLBOX_PAUSED_BY_USER):
-                print(f"[{datetime.now().strftime('%H:%M:%S')}] 🔌 Ladekabel abgezogen (Limit war {limit} W) -> Setze Ladelimit auf 15 kW zurück!")
-                WALLBOX_PAUSED_BY_USER = False
-                ok = set_wallbox_charge_power(15000)
-                time.sleep(1)
-                if ok:
+            # Physischer Steckerzustand bestimmen (mit Hysterese / Debounce):
+            is_currently_unplugged = (reg57 == 641 and power_w < 50)
+            is_currently_plugged = (wb.get("plugged") is True and reg57 != 641)
+
+            if is_currently_unplugged:
+                unplugged_counter += 1
+            else:
+                unplugged_counter = 0
+
+            # Wenn das Kabel nachweislich gesteckt ist, merken wir uns das:
+            if is_currently_plugged:
+                last_plug_state = True
+
+            # Nur wenn das Kabel mind. 3 Zyklen hintereinander (>= 30 Sek.) als abgesteckt gemessen wird,
+            # UND zuvor als eingesteckt bekannt war (echter Übergang Eingesteckt -> Abgesteckt):
+            if unplugged_counter >= 3 and last_plug_state is True:
+                last_plug_state = False  # Zustand auf ausgesteckt setzen, verhindert Mehrfachauslösung
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] 🔌 Ladekabel nachweislich abgezogen (Reg57={reg57}, Limit={limit} W).")
+
+                # Wenn die Wallbox zuvor pausiert/gedrosselt war (limit == 0 oder WALLBOX_PAUSED_BY_USER):
+                if limit == 0 or WALLBOX_PAUSED_BY_USER:
+                    WALLBOX_PAUSED_BY_USER = False
+                    ok = set_wallbox_charge_power(15000)
+                    time.sleep(1)
                     send_telegram(
                         "🔌 *Ladekabel abgezogen!*\n"
                         "⚡ Die Wallbox wurde automatisch wieder auf *15.0 kW* freigegeben.",
