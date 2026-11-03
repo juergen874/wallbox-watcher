@@ -47,6 +47,10 @@ INV_SERIAL = 1109501211
 TARGET_SOC = 66.0
 BATTERY_NETTO_KWH = 46.0
 CHARGING_EFFICIENCY = 0.90
+# 1-phasiger On-Board-Lader (Opel Corsa Electric lädt 1-phasig mit bis zu 20-32A)
+# Bei False oder 1 wird nur Phase 1 (L1) für die echte Ladeleistung herangezogen,
+# da die Deye-Wallbox fälschlicherweise L1 auf L2/L3 spiegelt.
+CHARGING_PHASES = 1
 
 # Wetter-Koordinaten für Zellertal (Donnersbergkreis)
 ZELLERTAL_LAT = 49.65
@@ -176,10 +180,12 @@ def get_wallbox_telemetry():
             p1 = float(re.search(r'var webdata_power1\s*=\s*"([0-9.]+)"', html).group(1))
             p2 = float(re.search(r'var webdata_power2\s*=\s*"([0-9.]+)"', html).group(1))
             p3 = float(re.search(r'var webdata_power3\s*=\s*"([0-9.]+)"', html).group(1))
-            ch = int(re.search(r'var webdata_charge\s*=\s*"([0-9]+)"', html).group(1))
+            # Bei 1-phasigem Fahrzeug (Opel Corsa Electric) nur L1 werten,
+            # da die Deye-Wallbox L1 fälschlicherweise auf L2/L3 spiegelt.
+            real_total_w = p1 if CHARGING_PHASES == 1 else (p1 + p2 + p3)
             data.update({
                 "online": True,
-                "total_w": p1 + p2 + p3,
+                "total_w": real_total_w,
                 "p1": p1, "p2": p2, "p3": p3,
                 "limit_w": ch
             })
@@ -317,7 +323,8 @@ def format_full_status_message(header="📊 *Aktueller Energie- & Ladestatus*", 
     # Wallbox
     if wb["online"]:
         if wb["total_w"] > 50:
-            lines.append(f"⚡ *Wallbox:* 🟢 Lädt mit *{wb['total_w']/1000.0:.2f} kW*")
+            phase_hint = " _(1-phasig L1)_" if CHARGING_PHASES == 1 else ""
+            lines.append(f"⚡ *Wallbox:* 🟢 Lädt mit *{wb['total_w']/1000.0:.2f} kW*{phase_hint}")
         else:
             lines.append(f"⚡ *Wallbox:* ⏸️ Standby / Bereit (0 W)")
     else:

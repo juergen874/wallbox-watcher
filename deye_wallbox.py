@@ -62,7 +62,10 @@ def get_wallbox_telemetry():
             if p1_m: data["power1"] = float(p1_m.group(1))
             if p2_m: data["power2"] = float(p2_m.group(1))
             if p3_m: data["power3"] = float(p3_m.group(1))
-            data["power_total"] = data["power1"] + data["power2"] + data["power3"]
+            # Für 1-phasige Fahrzeuge (z.B. Opel Corsa Electric) ist power1 die tatsächliche Ladeleistung
+            data["power_total_1p"] = data["power1"]
+            data["power_total_3p"] = data["power1"] + data["power2"] + data["power3"]
+            data["power_total"] = data["power_total_1p"]
 
             if ch_m: data["charge_limit_w"] = int(ch_m.group(1))
             if wm1_m:
