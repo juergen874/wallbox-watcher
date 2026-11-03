@@ -271,8 +271,28 @@ def get_corsa_status(force_refresh=False):
 
     return CARS_CACHE["data"] if CARS_CACHE["data"] else res
 
+def get_weather_condition_desc(code):
+    """Übersetzt den WMO-Wettercode in prägnante Beschreibung und passendes Icon."""
+    if code == 0:
+        return "☀️", "Klar / Sonnig"
+    elif code in [1, 2]:
+        return "🌤️", "Heiter bis wolkig"
+    elif code == 3:
+        return "☁️", "Bedeckt / Wolkig"
+    elif code in [45, 48]:
+        return "🌫️", "Nebel / Hochnebel"
+    elif code in [51, 53, 55]:
+        return "🌧️", "Nieselregen"
+    elif code in [61, 63, 65, 80, 81, 82]:
+        return "🌧️", "Regen"
+    elif code in [71, 73, 75, 85, 86]:
+        return "🌨️", "Schneefall"
+    elif code in [95, 96, 99]:
+        return "⛈️", "Gewitter"
+    return "⛅", "Teilweise wolkig"
+
 def get_weather_forecast_zellertal():
-    """Holt die Sonnenschein-Vorhersage für Zellertal via Open-Meteo."""
+    """Holt die Wetter- & Sonnenschein-Vorhersage für Zellertal via Open-Meteo."""
     global WEATHER_CACHE
     now = time.time()
     if WEATHER_CACHE["text"] and (now - WEATHER_CACHE["timestamp"]) < WEATHER_CACHE_TTL:
@@ -280,7 +300,7 @@ def get_weather_forecast_zellertal():
 
     url = (
         f"https://api.open-meteo.com/v1/forecast?latitude={ZELLERTAL_LAT}&longitude={ZELLERTAL_LON}"
-        "&daily=sunshine_duration,temperature_2m_max&timezone=Europe%2FBerlin"
+        "&daily=weathercode,sunshine_duration,temperature_2m_max,precipitation_probability_max&timezone=Europe%2FBerlin"
     )
     req = urllib.request.Request(url, headers={"User-Agent": "ZellertalSolar/1.0"})
     try:
@@ -288,25 +308,28 @@ def get_weather_forecast_zellertal():
             data = json.loads(resp.read().decode())
             daily = data.get("daily", {})
             times = daily.get("time", [])
+            wcodes = daily.get("weathercode", [])
             sun_secs = daily.get("sunshine_duration", [])
             t_max = daily.get("temperature_2m_max", [])
+            rain_probs = daily.get("precipitation_probability_max", [])
 
-            lines = ["🌤️ *Sonnenschein-Vorhersage Zellertal:*"]
+            lines = ["🌤️ *Wetter- & Solarprognose Zellertal:*"]
             days_de = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
             
             # Die nächsten 3 Tage anzeigen
-            for d_str, s_sec, temp in zip(times[:3], sun_secs[:3], t_max[:3]):
+            for d_str, wcode, s_sec, temp, rain in zip(times[:3], wcodes[:3], sun_secs[:3], t_max[:3], rain_probs[:3]):
                 dt = datetime.strptime(d_str, "%Y-%m-%d")
                 d_name = days_de[dt.weekday()]
                 sun_hours = s_sec / 3600.0
                 tag_label = "Heute" if dt.date() == datetime.now().date() else f"{d_name} ({dt.strftime('%d.%m.')})"
-                if sun_hours >= 4.0:
-                    icon = "☀️"
-                elif sun_hours >= 1.5:
-                    icon = "⛅"
-                else:
-                    icon = "☁️"
-                lines.append(f"   {icon} *{tag_label}:* ~*{sun_hours:.1f}h* Sonne (max {temp:.0f}°C)")
+                icon, condition_txt = get_weather_condition_desc(wcode)
+                
+                # Warnung bei Hochnebel/Bedeckt trotz berechneter Sonnenstunden
+                detail_parts = [f"~*{sun_hours:.1f}h* Sonne", condition_txt, f"max {temp:.0f}°C"]
+                if rain and rain >= 20:
+                    detail_parts.append(f"💧 {rain}%")
+
+                lines.append(f"   {icon} *{tag_label}:* " + " | ".join(detail_parts))
 
             WEATHER_CACHE["text"] = "\n".join(lines)
             WEATHER_CACHE["timestamp"] = now
