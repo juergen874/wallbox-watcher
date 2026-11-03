@@ -198,20 +198,21 @@ def get_wallbox_telemetry():
                 time.sleep(0.4)
             pass
 
-    # Prüfe den physischen Kabel-Status (Register 57) direkt per Modbus TCP
+    # Prüfe physischen Kabel-Status (Reg 57) und echtes Ladelimit (Reg 18) direkt per Modbus TCP
     if HAS_SOLARMAN and data["online"]:
         try:
             c = PySolarmanV5(WB_HOST, WB_SERIAL, port=8899, mb_slave_id=3, timeout=3.0, verbose=False)
+            reg18 = c.read_holding_registers(18, 1)[0]
             reg57 = c.read_holding_registers(57, 1)[0]
             c.disconnect()
+            data["limit_w"] = reg18
+            data["reg57"] = reg57
             # Register 57:
             # 641 = Unplugged (Stecker gezogen / kein CP)
             # 392 oder 416 = Plugged / Ready / Charging (Stecker gesteckt)
             data["plugged"] = (reg57 not in [0, 641])
-            data["reg57"] = reg57
         except Exception:
             # Bei kurzem Modbus-Timeout oder wenn Leistung fließt:
-            # NIEMALS fälschlicherweise auf 'unplugged' springen!
             if data["total_w"] > 200:
                 data["plugged"] = True
             elif hasattr(get_wallbox_telemetry, "_last_plugged"):
@@ -616,26 +617,17 @@ def monitor_wallbox_and_battery_loop():
             # 3. Automatische Re-Aktivierung auf 15 kW bei Stecker-Reset
             # Wenn der Benutzer zuvor "Pausieren" gedrückt hatte (WALLBOX_PAUSED_BY_USER bzw. limit == 0):
             # Sobald das Kabel wirklich abgezogen wird (Reg 57 = 641, keine Leistung, mind. 3 Zyklen lang),
-            # wird die Wallbox wieder auf 15 kW freigegeben.
+            # Automatische Re-Aktivierung auf 15 kW bei Stecker-Reset
+            # Wenn das Kabel physisch ausgesteckt ist (Reg 57 == 641):
             reg57 = wb.get("reg57")
             limit = wb.get("limit_w", 15000)
+            is_unplugged = (reg57 == 641 and power_w < 50)
 
-            # Physisch ausgesteckt ist das Kabel NUR, wenn Reg 57 exakt 641 ist UND keinerlei Strom fließt
-            physical_unplugged = (reg57 == 641 and power_w < 50)
-
-            if not hasattr(monitor_wallbox_and_battery_loop, "unplug_counter"):
-                monitor_wallbox_and_battery_loop.unplug_counter = 0
-
-            if physical_unplugged:
-                monitor_wallbox_and_battery_loop.unplug_counter += 1
-            else:
-                monitor_wallbox_and_battery_loop.unplug_counter = 0
-
-            # Nur wenn die Wallbox zuvor auf Pause (0 W) gesetzt war UND das Kabel mind. 30 Sekunden lang ausgesteckt ist:
-            if (WALLBOX_PAUSED_BY_USER or limit == 0) and monitor_wallbox_and_battery_loop.unplug_counter >= 3:
-                print(f"[{datetime.now().strftime('%H:%M:%S')}] 🔌 Ladekabel physisch abgezogen -> Setze Ladelimit auf 15 kW zurück!")
+            # A) Wenn die Wallbox auf 0 W gedrosselt ist und das Kabel ausgesteckt wird:
+            # Sofort automatisch wieder auf 15.0 kW freigeben!
+            if is_unplugged and (limit == 0 or WALLBOX_PAUSED_BY_USER):
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] 🔌 Ladekabel abgezogen (Limit war {limit} W) -> Setze Ladelimit auf 15 kW zurück!")
                 WALLBOX_PAUSED_BY_USER = False
-                monitor_wallbox_and_battery_loop.unplug_counter = 0
                 ok = set_wallbox_charge_power(15000)
                 time.sleep(1)
                 if ok:
