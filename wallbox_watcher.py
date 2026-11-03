@@ -236,21 +236,31 @@ def get_corsa_status(force_refresh=False):
             st = corsa_status.fetch_vehicle_status(v_id, token)
             soc = None
             autonomy = None
-            plugged = False
             charging_st = "Unbekannt"
+            rate = 0
+            remaining_time = None
+            updated_at = st.get("updatedAt", "")
             for e in st.get("energy", []):
                 if e.get("type", "").lower() in ["electric", "battery"]:
                     soc = e.get("level")
                     autonomy = e.get("autonomy")
-                    plugged = e.get("charging", {}).get("plugged", False)
-                    charging_st = e.get("charging", {}).get("status", "")
+                    ch = e.get("charging", {})
+                    plugged = ch.get("plugged", False)
+                    charging_st = ch.get("status", "")
+                    rate = ch.get("chargingRate", 0)
+                    remaining_time = ch.get("remainingTime")
+                    if e.get("updatedAt"):
+                        updated_at = e.get("updatedAt")
             res.append({
                 "id": v_id,
                 "label": label,
                 "soc": soc,
                 "autonomy": autonomy,
                 "plugged": plugged,
-                "charging": charging_st
+                "charging": charging_st,
+                "rate": rate,
+                "remaining_time": remaining_time,
+                "updated_at": updated_at
             })
         if res:
             CARS_CACHE["data"] = res
@@ -303,17 +313,41 @@ def get_weather_forecast_zellertal():
     except Exception:
         return "🌤️ *Wetter Zellertal:* Sonnendaten aktuell nicht abrufbar"
 
-def calculate_time_to_66(current_soc, power_watts):
+def parse_opel_timestamp(iso_str):
+    """Parst ISO-Zeitstempel von Opel (z.B. 2026-11-03T21:20:13Z) in lokale Zeit."""
+    if not iso_str:
+        return datetime.now()
+    try:
+        dt = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
+        # Konvertiere in lokale Zeitzone des Systems
+        return dt.astimezone().replace(tzinfo=None)
+    except Exception:
+        return datetime.now()
+
+def parse_iso_duration(dur_str):
+    """Parst ISO 8601 Dauer wie PT3H55M in Minuten."""
+    if not dur_str:
+        return 0
+    m = re.match(r"PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?", dur_str)
+    if not m:
+        return 0
+    h = int(m.group(1) or 0)
+    mins = int(m.group(2) or 0)
+    return h * 60 + mins
+
+def calculate_time_to_66(current_soc, power_watts, base_time=None):
+    if base_time is None:
+        base_time = datetime.now()
     if power_watts <= 200 or current_soc is None:
         return None, None, 0
     if current_soc >= TARGET_SOC:
-        return 0, datetime.now().strftime("%H:%M Uhr"), 0
+        return 0, base_time.strftime("%H:%M Uhr"), 0
     power_kw = (power_watts / 1000.0) * CHARGING_EFFICIENCY
     delta_soc = TARGET_SOC - current_soc
     needed_kwh = BATTERY_NETTO_KWH * (delta_soc / 100.0)
     hours = needed_kwh / power_kw
     minutes = int(round(hours * 60))
-    target_time = datetime.now() + timedelta(minutes=minutes)
+    target_time = base_time + timedelta(minutes=minutes)
     return minutes, target_time.strftime("%H:%M Uhr"), needed_kwh
 
 def format_full_status_message(header="📊 *Aktueller Energie- & Ladestatus*", force_car_refresh=False):
@@ -356,17 +390,28 @@ def format_full_status_message(header="📊 *Aktueller Energie- & Ladestatus*", 
     else:
         lines.append("   • _Fahrzeugdaten werden geladen..._")
 
-    # Prognose auf 66%
+    # Prognose auf 66% & Langzeit (Opel-Daten)
     if active_charging_car and wb["total_w"] > 50:
-        mins, target_clock, needed_kwh = calculate_time_to_66(active_charging_car["soc"], wb["total_w"])
-        lines.append("\n🎯 *Ladezeitprognose (Ziel 66%):*")
+        base_time = parse_opel_timestamp(active_charging_car.get("updated_at"))
+        time_str_opel = base_time.strftime("%H:%M Uhr")
+        mins, target_clock, needed_kwh = calculate_time_to_66(active_charging_car["soc"], wb["total_w"], base_time=base_time)
+        lines.append(f"\n🎯 *Ladezeitprognose (Basis Opel: {time_str_opel}):*")
         if mins == 0:
             lines.append(f"   ✅ Ziel von {TARGET_SOC:.0f}% ist bereits erreicht!")
         elif mins:
             h, m = mins // 60, mins % 60
             dur_str = f"{h}h {m}m" if h > 0 else f"{m} Minuten"
-            lines.append(f"   • Dauer bis {TARGET_SOC:.0f}%: ca. *{dur_str}* (um ~*{target_clock}*)")
-            lines.append(f"   • Benötigte Energie: ~*{needed_kwh:.1f} kWh*")
+            lines.append(f"   • Ziel {TARGET_SOC:.0f}%: ca. *{dur_str}* (um ~*{target_clock}*) | ~*{needed_kwh:.1f} kWh*")
+
+        # Langzeitprognose bis 100% (aus Opel Bordcomputer-Daten)
+        rem_str = active_charging_car.get("remaining_time")
+        rate_val = active_charging_car.get("rate")
+        rem_mins = parse_iso_duration(rem_str)
+        if rem_mins > 0:
+            rh, rm = rem_mins // 60, rem_mins % 60
+            full_clock = (base_time + timedelta(minutes=rem_mins)).strftime("%H:%M Uhr")
+            rate_info = f" ({rate_val} km/h)" if rate_val else ""
+            lines.append(f"   • Voll (100%): ca. *{rh}h {rm}m*{rate_info} (um ~*{full_clock}*)")
 
     # Wetter / Sonnenschein
     lines.append(f"\n{weather}")
