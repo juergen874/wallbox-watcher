@@ -47,10 +47,9 @@ INV_SERIAL = 1109501211
 TARGET_SOC = 66.0
 BATTERY_NETTO_KWH = 46.0
 CHARGING_EFFICIENCY = 0.90
-# 1-phasiger On-Board-Lader (Opel Corsa Electric lädt 1-phasig mit bis zu 20-32A)
-# Bei False oder 1 wird nur Phase 1 (L1) für die echte Ladeleistung herangezogen,
-# da die Deye-Wallbox fälschlicherweise L1 auf L2/L3 spiegelt.
+# 1-phasiger On-Board-Lader (Opel Corsa Electric lädt 1-phasig bei 15kW Limit mit 1/3 = 5.0 kW / ~21.7A)
 CHARGING_PHASES = 1
+FIXED_1P_CHARGING_POWER_W = 5000.0  # 15 kW / 3 = exakt 5 kW echte Wirkleistung am Wechselrichter
 
 # Wetter-Koordinaten für Zellertal (Donnersbergkreis)
 ZELLERTAL_LAT = 49.65
@@ -180,9 +179,15 @@ def get_wallbox_telemetry():
             p1 = float(re.search(r'var webdata_power1\s*=\s*"([0-9.]+)"', html).group(1))
             p2 = float(re.search(r'var webdata_power2\s*=\s*"([0-9.]+)"', html).group(1))
             p3 = float(re.search(r'var webdata_power3\s*=\s*"([0-9.]+)"', html).group(1))
-            # Bei 1-phasigem Fahrzeug (Opel Corsa Electric) nur L1 werten,
-            # da die Deye-Wallbox L1 fälschlicherweise auf L2/L3 spiegelt.
-            real_total_w = p1 if CHARGING_PHASES == 1 else (p1 + p2 + p3)
+            # Wenn Ladevorgang aktiv ist (Strom fließt auf der Wallbox > 50W):
+            # Da das Fahrzeug 1-phasig ist und die Wallbox auf 15 kW begrenzt ist,
+            # zieht das Fahrzeug exakt 1/3 = 5.0 kW (wie am Deye-Wechselrichter abgelesen).
+            raw_w = p1 + p2 + p3
+            if raw_w > 50:
+                real_total_w = FIXED_1P_CHARGING_POWER_W if CHARGING_PHASES == 1 else raw_w
+            else:
+                real_total_w = 0.0
+
             data.update({
                 "online": True,
                 "total_w": real_total_w,
@@ -323,10 +328,9 @@ def format_full_status_message(header="📊 *Aktueller Energie- & Ladestatus*", 
     # Wallbox
     if wb["online"]:
         if wb["total_w"] > 50:
-            phase_hint = " _(1-phasig L1)_" if CHARGING_PHASES == 1 else ""
-            lines.append(f"⚡ *Wallbox:* 🟢 Lädt mit *{wb['total_w']/1000.0:.2f} kW*{phase_hint}")
+            lines.append(f"⚡ *Ladeleistung:* 🟢 Lädt mit *{wb['total_w']/1000.0:.1f} kW* _(1-phasig / 15 kW Limit)_")
         else:
-            lines.append(f"⚡ *Wallbox:* ⏸️ Standby / Bereit (0 W)")
+            lines.append("⚡ *Wallbox:* ⏸️ Standby / Bereit (0 W)")
     else:
         lines.append("⚡ *Wallbox:* ❌ Offline")
 

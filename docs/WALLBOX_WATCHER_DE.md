@@ -79,10 +79,9 @@ tail -f ~/wallbox_watcher.log
 
 🚗 *Opel Corsa Electric (VR3UPZKXZLT000000)*
 🔋 Aktueller Akkustand: *42.0%* (138 km)
-🎯 Ziel: *66.0%* (+24.0% / +11.0 kWh netto)
-⚡ Ladeleistung: *6.89 kW* (Wallbox: 6.89 kW)
-⏱️ Benötigte Ladedauer: *1 Std. 47 Min.*
-🏁 Voraussichtlich fertig um: *23:11 Uhr*
+⚡ *Ladeleistung:* 🟢 Lädt mit *5.0 kW* _(1-phasig / 15 kW Limit)_
+⏱️ Benötigte Ladedauer: *2 Std. 27 Min.*
+🏁 Voraussichtlich fertig um: *23:51 Uhr*
 
 🏠 *Heimsystem & PV:*
 ☀️ PV-Erzeugung: *4.50 kW*

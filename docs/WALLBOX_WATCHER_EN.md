@@ -79,10 +79,9 @@ tail -f ~/wallbox_watcher.log
 
 🚗 *Opel Corsa Electric (VR3UPZKXZLT000000)*
 🔋 Current Battery: *42.0%* (138 km)
-🎯 Target: *66.0%* (+24.0% / +11.0 kWh net)
-⚡ Charging Power: *6.89 kW* (Wallbox: 6.89 kW)
-⏱️ Remaining Duration: *1 hr 47 min*
-🏁 Estimated Completion: *23:11*
+⚡ *Charging Power:* 🟢 Charging at *5.0 kW* _(1-phase / 15 kW limit)_
+⏱️ Remaining Duration: *2 hr 27 min*
+🏁 Estimated Completion: *23:51*
 
 🏠 *Home System & Solar:*
 ☀️ PV Generation: *4.50 kW*
