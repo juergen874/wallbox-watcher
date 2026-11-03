@@ -1,6 +1,6 @@
 # ⚡ Deye Wallbox & Inverter Watcher Suite
 
-[![Release](https://img.shields.io/badge/release-v1.2-blue.svg)](https://github.com/juergen874/wallbox-watcher/releases)
+[![Release](https://img.shields.io/badge/release-v1.4-blue.svg)](https://github.com/juergen874/wallbox-watcher/releases)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8%2B-green.svg)](https://www.python.org/)
 [![Platform Termux/Linux](https://img.shields.io/badge/platform-Termux%20%7C%20Linux-orange.svg)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -129,5 +129,71 @@ python3 wallbox_watcher.py --setup
 
 ---
 
-## 📄 Lizenz
-MIT License - Frei verwendbar und anpassbar.
+# 🇬🇧 English Overview & Documentation
+
+A modular Python automation and monitoring suite for:
+- **Deye Smart EV Wallbox** (192.168.188.130 via Modbus TCP Port 8899, Slave 3 / Register 18 & Web Telemetry)
+- **Deye SUN-12K-SG04LP3 Hybrid Inverter** (192.168.188.128 via Solarman V5 / Modbus TCP Port 8899, Slave 1)
+- **Opel Corsa Electric** (Battery SoC & telemetry via the official Stellantis Connected Car API)
+- **Telegram Bot** featuring interactive inline buttons & weather forecast for Zellertal
+
+---
+
+## 🚀 Key Features
+
+- ⚡ **Automated Charging Session Detection:**  
+  Detects when a vehicle starts charging (> 1,200 W) and sends an immediate push notification to Telegram.
+- 🎯 **Dynamic Charge Time Calculation (Target: 66% SoC):**  
+  Calculates required energy (kWh), remaining charge duration, and target clock time based on vehicle SoC and real charging power.
+- 🔋 **Smart Home Storage Management:**  
+  - **$\le$ 30% Storage:** Advisory alert to pause EV charging to prevent draining the home storage battery.  
+  - **$\ge$ 85% Storage:** Advisory alert recommending EV charging to consume solar surplus.
+- 🌤️ **Solar Forecast (Zellertal):**  
+  Daily sunshine hours forecast for the upcoming 3 days via the Open-Meteo API.
+- 🔘 **Direct Hardware Control via Telegram:**  
+  Real power limit control via Modbus TCP (Port 8899, Slave 3, Register 18):
+  - `[ ⏸️ Laden pausieren ]`: Throttles charge limit immediately to `0 W` (suspends charging).
+  - `[ ▶️ Laden starten ]`: Restores charge limit to `15,000 W` (enables charging).
+  - `[ 📊 Status aktualisieren ]`: Live query of Wallbox, Inverter, Vehicle, and Weather.
+- 🔌 **Automatic Unplug Reset (Auto-Resume to 15 kW):**  
+  When charging is paused (0 W), the daemon detects the cable being disconnected via Control Pilot telemetry (Register 57) and **instantly restores the 15.0 kW limit**, ensuring the next plug-in charges at full power without manual actions.
+- 🛡️ **Network & API Resilience:**  
+  - Instant asynchronous callback acknowledgement for Telegram buttons.
+  - Automatic retry and socket cleanup (`disconnect()`) for the Deye Modbus port 8899.
+  - 90-second in-memory cache for vehicle data to prevent Stellantis API throttling.
+
+---
+
+## 📦 Detailed Module Documentation
+
+| Component | German (DE) | English (EN) |
+| :--- | :--- | :--- |
+| **Deye Reader** | [📖 DEYE_READER_DE.md](docs/DEYE_READER_DE.md) | [📖 DEYE_READER_EN.md](docs/DEYE_READER_EN.md) |
+| **Corsa Status** | [🚗 CORSA_STATUS_DE.md](docs/CORSA_STATUS_DE.md) | [🚗 CORSA_STATUS_EN.md](docs/CORSA_STATUS_EN.md) |
+| **Deye Wallbox** | [⚡ DEYE_WALLBOX_DE.md](docs/DEYE_WALLBOX_DE.md) | [⚡ DEYE_WALLBOX_EN.md](docs/DEYE_WALLBOX_EN.md) |
+| **Wallbox Watcher** | [🤖 WALLBOX_WATCHER_DE.md](docs/WALLBOX_WATCHER_DE.md) | [🤖 WALLBOX_WATCHER_EN.md](docs/WALLBOX_WATCHER_EN.md) |
+
+---
+
+## 🛠️ Quick Installation
+
+```bash
+# 1. Install dependencies
+pip install requests pysolarmanv5
+
+# 2. Clone repository
+git clone https://github.com/juergen874/wallbox-watcher.git
+cd wallbox-watcher
+chmod +x *.py *.sh deye-reader/*.py
+
+# 3. Configure Telegram Bot
+python3 wallbox_watcher.py --setup
+
+# 4. Start 24/7 background daemon
+./start_watcher.sh
+```
+
+---
+
+## 📄 License
+MIT License - Free to use and adapt.
