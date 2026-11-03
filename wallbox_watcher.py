@@ -201,17 +201,22 @@ def get_wallbox_telemetry():
     # Prüfe den physischen Kabel-Status (Register 57) direkt per Modbus TCP
     if HAS_SOLARMAN and data["online"]:
         try:
-            c = PySolarmanV5(WB_HOST, WB_SERIAL, port=8899, mb_slave_id=3, timeout=2.5, verbose=False)
+            c = PySolarmanV5(WB_HOST, WB_SERIAL, port=8899, mb_slave_id=3, timeout=3.0, verbose=False)
             reg57 = c.read_holding_registers(57, 1)[0]
             c.disconnect()
             # Register 57:
             # 641 = Unplugged (Stecker gezogen / kein CP)
-            # 416 = Plugged / Ready / Charging (Stecker gesteckt)
-            data["plugged"] = (reg57 != 641)
+            # 392 oder 416 = Plugged / Ready / Charging (Stecker gesteckt)
+            data["plugged"] = (reg57 not in [0, 641])
+            data["reg57"] = reg57
         except Exception:
-            # Fallback: Wenn Leistung fließt, muss es gesteckt sein
-            if data["total_w"] > 500:
+            # Bei kurzem Modbus-Timeout oder wenn Leistung fließt:
+            # NIEMALS fälschlicherweise auf 'unplugged' springen!
+            if data["total_w"] > 200:
                 data["plugged"] = True
+            elif hasattr(get_wallbox_telemetry, "_last_plugged"):
+                data["plugged"] = get_wallbox_telemetry._last_plugged
+        get_wallbox_telemetry._last_plugged = data["plugged"]
     return data
 
 def get_corsa_status(force_refresh=False):
@@ -617,15 +622,29 @@ def monitor_wallbox_and_battery_loop():
                 # Beim allerersten Start merken wir uns den aktuellen Zustand
                 last_plug_state = is_plugged
 
-            # Fall A: Kabel wurde während des Betriebs abgezogen (Zustandswechsel True -> False)
-            # Fall B: Kabel ist bereits ausgesteckt, aber Ladelimit steht noch auf 0 W (z.B. nach Neustart oder verpasstem Event)
-            limit = wb.get("limit_w", 15000)
-            cable_just_unplugged = (last_plug_state is True and is_plugged is False)
-            unplugged_with_zero_limit = (is_plugged is False and limit == 0)
+            # Entprellung: Kabel-Abziehen erfordert 2 aufeinanderfolgende negative Messungen,
+            # um Fehlalarme bei minimalen TCP/WLAN-Verzögerungen komplett auszuschließen.
+            if not hasattr(monitor_wallbox_and_battery_loop, "unplug_counter"):
+                monitor_wallbox_and_battery_loop.unplug_counter = 0
 
-            if cable_just_unplugged or unplugged_with_zero_limit:
-                print(f"[{datetime.now().strftime('%H:%M:%S')}] 🔌 Ladekabel abgezogen (Limit: {limit} W) -> Setze Ladelimit auf 15 kW zurück!")
+            limit = wb.get("limit_w", 15000)
+
+            if is_plugged:
+                monitor_wallbox_and_battery_loop.unplug_counter = 0
+                if last_plug_state is False:
+                    print(f"[{datetime.now().strftime('%H:%M:%S')}] 🔌 Ladekabel am Fahrzeug eingesteckt.")
+                last_plug_state = True
+            else:
+                monitor_wallbox_and_battery_loop.unplug_counter += 1
+
+            # Erst wenn mindestens 2 Zyklen lang (mind. 20 Sekunden) das Kabel wirklich unbestreitbar ausgesteckt ist:
+            cable_confirmed_unplugged = (last_plug_state is True and monitor_wallbox_and_battery_loop.unplug_counter >= 2)
+            unplugged_with_zero_limit = (last_plug_state is not False and monitor_wallbox_and_battery_loop.unplug_counter >= 2 and limit == 0)
+
+            if cable_confirmed_unplugged or unplugged_with_zero_limit:
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] 🔌 Ladekabel bestätigt abgezogen (Limit: {limit} W) -> Setze Ladelimit auf 15 kW zurück!")
                 last_plug_state = False
+                monitor_wallbox_and_battery_loop.unplug_counter = 0
                 WALLBOX_PAUSED_BY_USER = False
                 ok = set_wallbox_charge_power(15000)
                 time.sleep(1)
@@ -635,13 +654,6 @@ def monitor_wallbox_and_battery_loop():
                         "⚡ Die Wallbox wurde für die nächste Ladung automatisch wieder auf *15.0 kW* freigegeben.",
                         reply_markup=get_inline_keyboard()
                     )
-
-            elif not last_plug_state and is_plugged:
-                # Kabel wurde frisch angesteckt
-                print(f"[{datetime.now().strftime('%H:%M:%S')}] 🔌 Ladekabel am Fahrzeug eingesteckt.")
-                last_plug_state = True
-
-            last_plug_state = is_plugged
 
         except Exception:
             pass
