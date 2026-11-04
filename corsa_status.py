@@ -160,10 +160,13 @@ def refresh_access_token(refresh_token):
     return new_tokens
 
 
-def get_valid_token():
+def get_valid_token(allow_interactive=False):
     tokens = load_tokens()
     if not tokens or "access_token" not in tokens:
-        tokens = perform_login()
+        if allow_interactive:
+            tokens = perform_login()
+        else:
+            return None
 
     saved_at = tokens.get("saved_at", 0)
     expires_in = tokens.get("expires_in", 3600)
@@ -171,10 +174,14 @@ def get_valid_token():
         try:
             tokens = refresh_access_token(tokens["refresh_token"])
         except Exception as e:
-            print(f"⚠️ Token-Erneuerung fehlgeschlagen ({e}), starte neuen Login...")
-            tokens = perform_login()
+            print(f"⚠️ Token-Erneuerung fehlgeschlagen ({e})")
+            if allow_interactive:
+                tokens = perform_login()
+            else:
+                # Behalte den alten Token als Notnagel oder None
+                return tokens.get("access_token")
 
-    return tokens["access_token"]
+    return tokens.get("access_token")
 
 
 def fetch_vehicles(access_token):
@@ -207,7 +214,7 @@ def fetch_vehicle_status(vehicle_id, access_token):
 
 
 def display_status():
-    token = get_valid_token()
+    token = get_valid_token(allow_interactive=True)
     vehicles = fetch_vehicles(token)
 
     if vehicles is None:
@@ -244,6 +251,11 @@ def display_status():
         charging_status = "Unbekannt"
         plugged = False
         rate = 0
+        mode = None
+        remaining_time = None
+        cap_kwh = None
+        res_kwh = None
+        health_res = None
         updated_at = status.get("updatedAt", "")
 
         for e in energy_list:
@@ -254,18 +266,44 @@ def display_status():
                 charging_status = charging.get("status", "Unbekannt")
                 plugged = charging.get("plugged", False)
                 rate = charging.get("chargingRate", 0)
+                mode = charging.get("chargingMode")
+                remaining_time = charging.get("remainingTime")
+                
+                b_load = e.get("battery", {}).get("load", {})
+                if b_load.get("capacity"):
+                    cap_kwh = b_load.get("capacity") / 1000.0
+                if b_load.get("residual"):
+                    res_kwh = b_load.get("residual") / 1000.0
+                health = e.get("battery", {}).get("health", {})
+                if health.get("resistance"):
+                    health_res = health.get("resistance")
+
+        # Weitere Messwerte aus status
+        odometer_km = status.get("odometer", {}).get("mileage")
+        temp_c = status.get("environment", {}).get("air", {}).get("temp")
+        bat_12v = status.get("battery", {}).get("voltage")
+        ignition = status.get("ignition", {}).get("type")
+        precond = status.get("preconditioning", {}).get("airConditioning", {}).get("status")
+        pos = status.get("lastPosition", {}).get("geometry", {}).get("coordinates")
 
         status_clean = str(charging_status).lower()
         if status_clean in ["inprogress", "charging"]:
             is_charging = "⚡ JA (Wird geladen)"
             if rate:
                 is_charging += f" mit {rate} km/h"
+            if mode:
+                is_charging += f" ({mode})"
         elif status_clean in ["stopped", "paused"]:
             is_charging = "⏸️ Pausiert / Bereit"
         elif status_clean in ["complete", "completed"]:
             is_charging = "✅ Voll aufgeladen"
         else:
             is_charging = f"ℹ️ {charging_status}"
+
+        # Restladezeit formatieren (PT5H10M -> 5 Std. 10 Min.)
+        rem_str = ""
+        if remaining_time:
+            rem_str = remaining_time.replace("PT", "").replace("H", " Std. ").replace("M", " Min.")
 
         time_display = ""
         if updated_at:
@@ -277,11 +315,31 @@ def display_status():
 
         print(f"\n🚘 Fahrzeug {idx}: {label}")
         print(f"   VIN:             {vin}")
+        if odometer_km is not None:
+            print(f"   Kilometerstand:  {odometer_km:,.1f} km".replace(",", "."))
         print(f"   Akkustand (SoC): {soc} %")
+        if res_kwh is not None and cap_kwh is not None:
+            print(f"   Akku-Energie:    {res_kwh:.1f} kWh / {cap_kwh:.1f} kWh")
+        if health_res is not None:
+            print(f"   Akku-Zustand:    {health_res} % (SOH / Health)")
         if autonomy != "Unbekannt":
             print(f"   Restreichweite:  ~{autonomy} km")
         print(f"   Ladekabel:       {'🔌 Eingesteckt' if plugged else '⚪ Nicht eingesteckt'}")
         print(f"   Ladevorgang:     {is_charging}")
+        if rem_str:
+            print(f"   Restladezeit:    ⏱️ noch {rem_str}")
+        if temp_c is not None:
+            print(f"   Außentemperatur: 🌡️ {temp_c:.1f} °C")
+        if bat_12v is not None:
+            print(f"   12V-Batterie:    {bat_12v:.0f} %")
+        if ignition:
+            ign_str = "Ein (StartUp)" if ignition == "StartUp" else "Aus (Stop)"
+            print(f"   Zündung:         {ign_str}")
+        if precond:
+            ac_str = "Aktiv" if precond.lower() == "enabled" else "Aus (Disabled)"
+            print(f"   Klimatisierung:  {ac_str}")
+        if pos and len(pos) >= 2:
+            print(f"   GPS-Position:    📍 {pos[1]:.5f}° N, {pos[0]:.5f}° E")
         if time_display:
             print(f"   Letztes Update:  {time_display}")
 
