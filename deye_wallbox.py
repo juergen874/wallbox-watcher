@@ -1,7 +1,7 @@
 #!/data/data/com.termux/files/usr/bin/python3
 """
-Deye Wallbox & Hybrid Inverter Monitor / Control Tool
-Liest Live-Telemetrie der Deye EV Wallbox (192.168.188.130) und des Deye SUN-12K (192.168.188.128) aus.
+Deye Wallbox Monitor / Control Tool
+Liest Live-Telemetrie der Deye EV Wallbox (192.168.188.130) aus.
 """
 
 import sys
@@ -13,15 +13,7 @@ import urllib.request
 import base64
 from datetime import datetime
 
-try:
-    from pysolarmanv5 import PySolarmanV5
-    HAS_SOLARMAN = True
-except ImportError:
-    HAS_SOLARMAN = False
-
 WB_HOST = "192.168.188.130"
-INV_HOST = "192.168.188.128"
-INV_SERIAL = 1109501211
 WB_SERIAL = 1221073414
 
 def get_wallbox_telemetry():
@@ -77,27 +69,8 @@ def get_wallbox_telemetry():
 
     return data
 
-def get_inverter_pv_summary():
-    """Liest die PV-Erzeugung und den Batteriespeicher aus dem Deye SUN-12K."""
-    if not HAS_SOLARMAN:
-        return None
-    try:
-        client = PySolarmanV5(INV_HOST, INV_SERIAL, port=8899, mb_slave_id=1, verbose=False)
-        regs_solar = client.read_holding_registers(529, 1)  # PV Ertrag heute kWh / 10
-        regs_soc = client.read_holding_registers(588, 1)    # Battery SOC %
-        regs_pv_w = client.read_holding_registers(672, 1)   # PV Power Total W
-        regs_grid_w = client.read_holding_registers(625, 1) # Grid Power Total W
-        return {
-            "pv_power_w": regs_pv_w[0] if regs_pv_w else 0,
-            "battery_soc": regs_soc[0] if regs_soc else 0,
-            "grid_power_w": regs_grid_w[0] if regs_grid_w else 0
-        }
-    except Exception:
-        return None
-
 def display_status():
     wb = get_wallbox_telemetry()
-    inv = get_inverter_pv_summary()
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print("=" * 65)
@@ -123,19 +96,10 @@ def display_status():
     print(f"   Phase 1 (L1): {wb['power1']:.0f} W")
     print(f"   Phase 2 (L2): {wb['power2']:.0f} W")
     print(f"   Phase 3 (L3): {wb['power3']:.0f} W")
-
-    if inv:
-        print("-" * 65)
-        print("☀️  WECHSELRICHTER STATUS (Deye SUN-12K):")
-        print(f"   PV-Leistung:      {inv['pv_power_w']} W")
-        print(f"   Batteriespeicher: {inv['battery_soc']} %")
-        grid_status = "Bezug" if inv['grid_power_w'] >= 0 else "Einspeisung"
-        print(f"   Netzstatus:       {grid_status} ({abs(inv['grid_power_w'])} W)")
-
     print("=" * 65)
 
 def main():
-    parser = argparse.ArgumentParser(description="Deye EV Wallbox & Inverter Monitor Tool")
+    parser = argparse.ArgumentParser(description="Deye EV Wallbox Monitor Tool")
     parser.add_argument("-w", "--watch", type=int, nargs="?", const=3, help="Live-Überwachung alle N Sekunden (Standard: 3s)")
     parser.add_argument("--json", action="store_true", help="Ausgabe als JSON")
     args = parser.parse_args()
@@ -143,7 +107,6 @@ def main():
     if args.json:
         import json
         wb = get_wallbox_telemetry()
-        wb["inverter"] = get_inverter_pv_summary()
         print(json.dumps(wb, indent=2))
         return
 
