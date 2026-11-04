@@ -150,11 +150,57 @@ def display_status():
     print(f"  Phase 3 (L3):  {data['power3_w']:>6.0f} W  |  {data['voltage3_v']:>5.1f} V  |  {data['current3_a']:>4.1f} A")
     print("=" * 65)
 
+def set_charge_power(watts):
+    """Schreibt das Ladelimit in Register 18 der Deye-Wallbox (0 = Stopp, bis 22000 W)."""
+    watts = int(watts)
+    if watts < 0 or watts > 22000:
+        print(f"❌ Ungültiger Wert: {watts} W. Erlaubt sind 0 bis 22000 W.")
+        return False
+
+    try:
+        c = PySolarmanV5(WB_HOST, WB_SERIAL, port=WB_PORT, mb_slave_id=WB_SLAVE_ID, timeout=3.0, verbose=False)
+        c.write_multiple_holding_registers(18, [watts])
+        read_back = c.read_holding_registers(18, 1)[0]
+        c.disconnect()
+        if read_back == watts:
+            print(f"✓ Ladelimit erfolgreich auf {watts} W ({watts/1000:.1f} kW) gesetzt.")
+            return True
+        else:
+            print(f"⚠️ Rückmeldung abweichend: Soll {watts} W, Ist {read_back} W.")
+            return False
+    except Exception as e:
+        print(f"❌ Fehler bei der Modbus-Übertragung: {e}")
+        return False
+
 def main():
-    parser = argparse.ArgumentParser(description="Deye EV Wallbox Reiner Modbus Monitor")
+    parser = argparse.ArgumentParser(description="Deye EV Wallbox Reiner Modbus Monitor & Steuerung")
     parser.add_argument("-w", "--watch", type=int, nargs="?", const=3, help="Live-Überwachung alle N Sekunden (Standard: 3s)")
     parser.add_argument("--json", action="store_true", help="Ausgabe als JSON")
+    parser.add_argument("--start", action="store_true", help="Ladevorgang starten / freigeben (Standard: 15 kW)")
+    parser.add_argument("--stop", action="store_true", help="Ladevorgang stoppen / pausieren (0 W)")
+    parser.add_argument("--set", type=int, metavar="WATTS", help="Ladelimit in Watt festlegen (z.B. --set 11000 oder --set 15000)")
     args = parser.parse_args()
+
+    if args.start:
+        target = args.set if args.set else 15000
+        print(f"⚡ Starte Ladung mit {target} W...")
+        set_charge_power(target)
+        time.sleep(1)
+        display_status()
+        return
+
+    if args.stop:
+        print("⏸️ Stoppe / pausiere Ladung (0 W)...")
+        set_charge_power(0)
+        time.sleep(1)
+        display_status()
+        return
+
+    if args.set is not None:
+        set_charge_power(args.set)
+        time.sleep(1)
+        display_status()
+        return
 
     if args.json:
         import json
@@ -176,3 +222,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
