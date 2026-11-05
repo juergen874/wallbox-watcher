@@ -505,8 +505,7 @@ def async_execute_pause(user):
         WALLBOX_PAUSED_BY_USER = True
         send_telegram(
             f"⏸️ *Ladung von {user} erfolgreich pausiert!*\n"
-            "⚡ Die Ladeleistung der Wallbox wurde über Modbus auf *0 W* gesetzt.\n\n"
-            "ℹ️ _Sobald das Ladekabel abgezogen wird, wird die Wallbox automatisch wieder auf 15 kW freigegeben._",
+            "⚡ Die Ladeleistung der Wallbox wurde über Modbus auf *0 W* gesetzt.",
             reply_markup=get_inline_keyboard()
         )
     else:
@@ -578,7 +577,6 @@ def monitor_wallbox_and_battery_loop():
     global NOTIFIED_SOC_30, NOTIFIED_SOC_85
     print(f"[{datetime.now().strftime('%H:%M:%S')}] Wallbox & Batterie Watcher aktiv. Überwache {WB_HOST} & {INV_HOST}...")
     is_charging_session = False
-    previously_any_car_plugged = True
 
     while True:
         try:
@@ -629,37 +627,6 @@ def monitor_wallbox_and_battery_loop():
                 is_charging_session = False
                 print(f"[{datetime.now().strftime('%H:%M:%S')}] Ladevorgang beendet.")
                 send_telegram("⏸️ *Ladevorgang an der Wallbox beendet / pausiert.*", reply_markup=get_inline_keyboard())
-
-            # 3. Automatische Re-Aktivierung auf 15 kW, wenn bei BEIDEN Fahrzeugen der Stecker abgezogen ist
-            # Da die Wallbox bei 0 W Ladelimit hardwarebedingt immer '641' meldet,
-            # nutzen wir die zuverlässige Opel-Cloud-Rückmeldung der beiden Corsa-e.
-            limit = wb.get("limit_w", 15000)
-            if limit == 0 or WALLBOX_PAUSED_BY_USER:
-                cars = get_corsa_status()
-                if cars:
-                    # Prüfe, ob mindestens ein Auto angesteckt ist
-                    any_plugged = any(c.get("plugged") is True for c in cars)
-                    
-                    if any_plugged:
-                        previously_any_car_plugged = True
-                    elif previously_any_car_plugged:
-                        # Übergang: Zuvor war mind. ein Auto angesteckt, jetzt sind BEIDE Autos ausgesteckt!
-                        previously_any_car_plugged = False
-                        print(f"[{datetime.now().strftime('%H:%M:%S')}] 🔌 Bei beiden Fahrzeugen Ladekabel abgezogen -> Setze Wallbox automatisch auf 15.0 kW zurück!")
-                        WALLBOX_PAUSED_BY_USER = False
-                        ok = set_wallbox_charge_power(15000)
-                        time.sleep(1)
-                        if ok:
-                            send_telegram(
-                                "🔌 *Ladekabel an beiden Fahrzeugen abgezogen!*\n"
-                                "⚡ Die Wallbox wurde automatisch wieder auf *15.0 kW* freigegeben.",
-                                reply_markup=get_inline_keyboard()
-                            )
-            else:
-                # Wallbox steht nicht auf 0 W -> merke aktuellen Steckerstatus
-                cars = get_corsa_status()
-                if cars:
-                    previously_any_car_plugged = any(c.get("plugged") is True for c in cars)
 
         except Exception:
             pass
