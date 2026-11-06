@@ -34,6 +34,9 @@ except Exception:
     HAS_CORSA = False
 
 try:
+    import queue
+    import pysolarmanv5.pysolarmanv5 as _psm
+    _psm.Queue = queue.Queue
     from pysolarmanv5 import PySolarmanV5
     HAS_SOLARMAN = True
 except ImportError:
@@ -133,17 +136,22 @@ def get_inverter_data():
         try:
             client = PySolarmanV5(INV_HOST, INV_SERIAL, port=8899, mb_slave_id=1, timeout=4.0, verbose=False)
             regs_soc = client.read_holding_registers(588, 1)    # Battery SOC %
-            regs_pv_w = client.read_holding_registers(672, 1)   # PV Power Total W
+            regs_pv = client.read_holding_registers(672, 4)     # PV1 Power (672), PV2 Power (673), PV3 (674), PV4 (675)
             regs_grid_w = client.read_holding_registers(625, 1) # Grid Power Total W
             
             # Wichtig: Sofort sauber trennen, damit Port 8899 nicht blockiert bleibt!
             client.disconnect()
             client = None
 
+            total_pv_w = sum(regs_pv) if regs_pv else 0
+
+            grid_raw = regs_grid_w[0] if regs_grid_w else 0
+            if grid_raw > 32767:
+                grid_raw -= 65536
             fresh_data = {
-                "pv_power_w": regs_pv_w[0] if regs_pv_w else 0,
+                "pv_power_w": total_pv_w,
                 "battery_soc": regs_soc[0] if regs_soc else 0,
-                "grid_power_w": regs_grid_w[0] if regs_grid_w else 0,
+                "grid_power_w": grid_raw,
                 "online": True
             }
             INVERTER_CACHE["data"] = fresh_data
@@ -178,7 +186,7 @@ def get_wallbox_telemetry():
         "p1": 0.0,
         "p2": 0.0,
         "p3": 0.0,
-        "limit_w": getattr(get_wallbox_telemetry, "_last_limit_w", 15000),
+        "limit_w": getattr(get_wallbox_telemetry, "_last_limit_w", 11000),
         "reg57": getattr(get_wallbox_telemetry, "_last_reg57", None),
         "plugged": getattr(get_wallbox_telemetry, "_last_plugged", True)
     }
@@ -405,11 +413,11 @@ def format_full_status_message(header="📊 *Aktueller Energie- & Ladestatus*", 
     # Wallbox
     if wb["online"]:
         if wb["total_w"] > 50:
-            limit_str = f"{wb.get('limit_w', 15000)/1000:.1f} kW Limit"
+            limit_str = f"{wb.get('limit_w', 11000)/1000:.1f} kW Limit"
             lines.append(f"⚡ *Ladeleistung:* 🟢 Lädt mit *{wb['total_w']/1000.0:.2f} kW* _({limit_str})_")
             lines.append(f"   _(L1: {wb['p1']:.0f} W | L2: {wb['p2']:.0f} W | L3: {wb['p3']:.0f} W)_")
         else:
-            limit_kw = wb.get('limit_w', 15000) / 1000.0
+            limit_kw = wb.get('limit_w', 11000) / 1000.0
             lines.append(f"⚡ *Wallbox:* ⏸️ Standby / Bereit (0 W | Limit: {limit_kw:.1f} kW)")
     else:
         lines.append("⚡ *Wallbox:* ❌ Offline")
@@ -478,7 +486,7 @@ def get_inline_keyboard():
     }
 
 def async_reply_status():
-    msg = format_full_status_message("📊 *Aktualisierter Status*")
+    msg = format_full_status_message("📊 *Aktualisierter Status*", force_car_refresh=True)
     send_telegram(msg, reply_markup=get_inline_keyboard())
 
 
@@ -516,14 +524,14 @@ def async_execute_pause(user):
 
 def async_execute_start(user):
     global WALLBOX_PAUSED_BY_USER
-    ok = set_wallbox_charge_power(15000)
+    ok = set_wallbox_charge_power(11000)
     time.sleep(1)
     status_text = format_full_status_message()
     if ok:
         WALLBOX_PAUSED_BY_USER = False
         send_telegram(
             f"▶️ *Ladung von {user} erfolgreich gestartet / freigegeben!*\n"
-            "⚡ Die Wallbox wurde über Modbus auf *15.0 kW* freigegeben.",
+            "⚡ Die Wallbox wurde über Modbus auf *11.0 kW* freigegeben.",
             reply_markup=get_inline_keyboard()
         )
     else:
@@ -576,6 +584,11 @@ def monitor_wallbox_and_battery_loop():
     """Überwacht die Wallbox und meldet Ladebeginn/Ende sowie Speicherstände (30% / 85%)."""
     global NOTIFIED_SOC_30, NOTIFIED_SOC_85
     print(f"[{datetime.now().strftime('%H:%M:%S')}] Wallbox & Batterie Watcher aktiv. Überwache {WB_HOST} & {INV_HOST}...")
+    try:
+        # Einmalig im Hintergrund initial abrufen, damit Daten direkt im Cache sind
+        threading.Thread(target=get_corsa_status, kwargs={"force_refresh": True}, daemon=True).start()
+    except Exception:
+        pass
     is_charging_session = False
 
     while True:
