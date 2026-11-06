@@ -472,22 +472,28 @@ def format_full_status_message(header="📊 *Aktueller Energie- & Ladestatus*", 
 
     return "\n".join(lines)
 
-def get_inline_keyboard():
+def get_inline_keyboard(current_watts=None):
     return {
         "inline_keyboard": [
             [
-                {"text": "▶️ Laden starten", "callback_data": "start"},
-                {"text": "⏸️ Laden pausieren", "callback_data": "pause"}
+                {"text": "⏸️ Pause (0W)", "callback_data": "set_0"},
+                {"text": "⚡ 4.1 kW", "callback_data": "set_4100"},
+                {"text": "⚡ 7.4 kW", "callback_data": "set_7400"},
+                {"text": "⚡ 11 kW", "callback_data": "set_11000"}
             ],
             [
-                {"text": "📊 Status aktualisieren", "callback_data": "status"}
+                {"text": "➖ 1 kW", "callback_data": "step_down"},
+                {"text": "➕ 1 kW", "callback_data": "step_up"},
+                {"text": "📊 Status", "callback_data": "status"}
             ]
         ]
     }
 
 def async_reply_status():
+    wb = get_wallbox_telemetry()
+    cur_w = wb.get("limit_w", 11000)
     msg = format_full_status_message("📊 *Aktualisierter Status*", force_car_refresh=True)
-    send_telegram(msg, reply_markup=get_inline_keyboard())
+    send_telegram(msg, reply_markup=get_inline_keyboard(cur_w))
 
 
 def set_wallbox_charge_power(watts):
@@ -499,46 +505,59 @@ def set_wallbox_charge_power(watts):
             c = PySolarmanV5(WB_HOST, WB_SERIAL, port=8899, mb_slave_id=3, timeout=5.0, verbose=False)
             c.write_multiple_holding_registers(18, [int(watts)])
             c.disconnect()
+            get_wallbox_telemetry._last_limit_w = int(watts)
             return True
         except Exception as e:
             time.sleep(0.5)
     return False
 
-def async_execute_pause(user):
+def async_execute_set(watts, user="Jemand"):
     global WALLBOX_PAUSED_BY_USER
-    ok = set_wallbox_charge_power(0)
+    watts = max(0, min(11000, int(watts)))
+    ok = set_wallbox_charge_power(watts)
     time.sleep(1)
-    status_text = format_full_status_message()
     if ok:
-        WALLBOX_PAUSED_BY_USER = True
-        send_telegram(
-            f"⏸️ *Ladung von {user} erfolgreich pausiert!*\n"
-            "⚡ Die Ladeleistung der Wallbox wurde über Modbus auf *0 W* gesetzt.",
-            reply_markup=get_inline_keyboard()
-        )
+        WALLBOX_PAUSED_BY_USER = (watts == 0)
+        if watts == 0:
+            send_telegram(
+                f"⏸️ *Ladung von {user} pausiert!*\n"
+                "⚡ Ladelimit der Wallbox über Modbus auf *0 W* gesetzt.",
+                reply_markup=get_inline_keyboard(watts)
+            )
+        else:
+            send_telegram(
+                f"⚡ *Ladelimit von {user} geändert!*\n"
+                f"Ladeleistung auf *{watts/1000:.1f} kW* ({watts} W) eingestellt.",
+                reply_markup=get_inline_keyboard(watts)
+            )
     else:
         send_telegram(
-            f"⚠️ *Pause-Befehl von {user}:* Fehler bei der Modbus-Übertragung an die Wallbox.",
+            f"⚠️ *Fehler beim Einstellen von {watts} W durch {user}:* Keine Verbindung zur Wallbox.",
             reply_markup=get_inline_keyboard()
         )
 
-def async_execute_start(user):
-    global WALLBOX_PAUSED_BY_USER
-    ok = set_wallbox_charge_power(11000)
-    time.sleep(1)
-    status_text = format_full_status_message()
-    if ok:
-        WALLBOX_PAUSED_BY_USER = False
-        send_telegram(
-            f"▶️ *Ladung von {user} erfolgreich gestartet / freigegeben!*\n"
-            "⚡ Die Wallbox wurde über Modbus auf *11.0 kW* freigegeben.",
-            reply_markup=get_inline_keyboard()
-        )
+def async_execute_step(delta_watts, user="Jemand"):
+    wb = get_wallbox_telemetry()
+    current_w = wb.get("limit_w", 11000)
+    new_w = max(0, min(11000, current_w + delta_watts))
+    async_execute_set(new_w, user=user)
+
+def parse_set_power(text):
+    """Parst Eingaben wie '/set 7.5', '/set 7500', '/set 11kw', 'set 6' etc."""
+    m = re.search(r"^(?:/set|set)\s*([0-9]+(?:[\.,][0-9]+)?)\s*(kw|w)?", text, re.IGNORECASE)
+    if not m:
+        # Fallback falls jemand nur '/set' ohne Zahl schickt
+        if text.strip() in ["/set", "set"]:
+            return "HELP"
+        return None
+    val = float(m.group(1).replace(",", "."))
+    unit = (m.group(2) or "").lower()
+
+    if unit == "kw" or val <= 22:
+        watts = int(round(val * 1000))
     else:
-        send_telegram(
-            f"⚠️ *Start-Befehl von {user}:* Fehler bei der Modbus-Übertragung an die Wallbox.",
-            reply_markup=get_inline_keyboard()
-        )
+        watts = int(round(val))
+    return watts
 
 def handle_telegram_updates():
     """Hintergrund-Thread: Hört auf Button-Klicks und Befehle via Long-Polling."""
@@ -563,17 +582,64 @@ def handle_telegram_updates():
                             threading.Thread(target=async_reply_status, daemon=True).start()
 
                         elif data == "start":
-                            answer_callback(cb_id, "Starte Ladung...")
-                            threading.Thread(target=async_execute_start, args=(user,), daemon=True).start()
+                            answer_callback(cb_id, "Setze auf 11 kW...")
+                            threading.Thread(target=async_execute_set, args=(11000, user), daemon=True).start()
 
                         elif data == "pause":
                             answer_callback(cb_id, "Pausiere Ladung...")
-                            threading.Thread(target=async_execute_pause, args=(user,), daemon=True).start()
+                            threading.Thread(target=async_execute_set, args=(0, user), daemon=True).start()
+
+                        elif data.startswith("set_"):
+                            try:
+                                target_w = int(data.split("_")[1])
+                                answer_callback(cb_id, f"Setze auf {target_w/1000:.1f} kW...")
+                                threading.Thread(target=async_execute_set, args=(target_w, user), daemon=True).start()
+                            except Exception:
+                                pass
+
+                        elif data == "step_up":
+                            answer_callback(cb_id, "+1 kW...")
+                            threading.Thread(target=async_execute_step, args=(1000, user), daemon=True).start()
+
+                        elif data == "step_down":
+                            answer_callback(cb_id, "-1 kW...")
+                            threading.Thread(target=async_execute_step, args=(-1000, user), daemon=True).start()
 
                     elif "message" in update:
                         msg = update["message"]
-                        text = msg.get("text", "").strip().lower()
-                        if text in ["/status", "status", "ladung", "solar", "strom", "wetter"]:
+                        text = msg.get("text", "").strip()
+                        lower_text = text.lower()
+                        user = msg.get("from", {}).get("first_name", "Jemand")
+
+                        if lower_text in ["/start", "/help", "hilfe"]:
+                            help_msg = (
+                                "⚡ *Wallbox & Solar Watcher Hilfe*\n\n"
+                                "Folgende Befehle stehen zur Verfügung:\n"
+                                "• `/status` - Aktueller Status & Ladeübersicht\n"
+                                "• `/set <kW>` - Ladeleistung einstellen (z.B. `/set 7.5` oder `/set 11`)\n"
+                                "• `/set 0` - Ladevorgang pausieren (0 W)\n\n"
+                                "Oder nutze direkt die Buttons unter jeder Meldung!"
+                            )
+                            send_telegram(help_msg, reply_markup=get_inline_keyboard())
+
+                        elif lower_text.startswith("/set") or lower_text.startswith("set"):
+                            parsed = parse_set_power(text)
+                            if parsed == "HELP":
+                                send_telegram(
+                                    "ℹ️ *Benutzung von /set:*\n"
+                                    "Gib die gewünschte Ladeleistung an, z.B.:\n"
+                                    "• `/set 11` (11 kW)\n"
+                                    "• `/set 7.5` (7.5 kW)\n"
+                                    "• `/set 4.1` (4.1 kW / 6A)\n"
+                                    "• `/set 0` (Pause)",
+                                    reply_markup=get_inline_keyboard()
+                                )
+                            elif parsed is not None:
+                                threading.Thread(target=async_execute_set, args=(parsed, user), daemon=True).start()
+                            else:
+                                send_telegram("⚠️ Ungültiger Wert für `/set`. Beispiel: `/set 8` oder `/set 7.5`")
+
+                        elif lower_text in ["/status", "status", "ladung", "solar", "strom", "wetter"]:
                             threading.Thread(target=async_reply_status, daemon=True).start()
 
         except Exception:
