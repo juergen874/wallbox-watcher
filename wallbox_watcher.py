@@ -58,10 +58,6 @@ FIXED_1P_CHARGING_POWER_W = 5000.0  # 15 kW / 3 = exakt 5 kW echte Wirkleistung 
 ZELLERTAL_LAT = 49.65
 ZELLERTAL_LON = 8.14
 
-# Router IP für WLAN-Keepalive (WLAN-Schlaf verhindern)
-WIFI_KEEPALIVE_HOST = "192.168.188.1"
-WIFI_KEEPALIVE_INTERVAL = 60  # Einmal pro Minute
-
 # Caches
 CARS_CACHE = {"data": [], "timestamp": 0}
 CACHE_TTL_SECONDS = 300  # Opel-Cloud Abfrageintervall: alle 5 Minuten
@@ -717,20 +713,6 @@ def monitor_wallbox_and_battery_loop():
 
         time.sleep(10)
 
-def wifi_keepalive_loop():
-    """Hintergrund-Thread: Schickt jede Minute einen Ping an den Router, um das WLAN-Modul wachzuhalten."""
-    import subprocess
-    while True:
-        try:
-            subprocess.run(
-                ["ping", "-c", "1", "-W", "2", WIFI_KEEPALIVE_HOST],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
-            )
-        except Exception:
-            pass
-        time.sleep(WIFI_KEEPALIVE_INTERVAL)
-
 def main():
     if "--setup" in sys.argv:
         print("=== TELEGRAM BOT EINRICHTUNG ===")
@@ -741,15 +723,11 @@ def main():
         send_telegram("👋 *Wallbox Watcher eingerichtet!*", reply_markup=get_inline_keyboard())
         sys.exit(0)
 
-    # 1. WLAN-Keepalive Thread starten (hält das Android-WLAN wach)
-    wifi_thread = threading.Thread(target=wifi_keepalive_loop, daemon=True)
-    wifi_thread.start()
-
-    # 2. Telegram Bot Polling Thread
+    # 1. Telegram Bot Polling Thread
     bot_thread = threading.Thread(target=handle_telegram_updates, daemon=True)
     bot_thread.start()
 
-    # 3. Haupt-Überwachungsschleife
+    # 2. Haupt-Überwachungsschleife
     monitor_wallbox_and_battery_loop()
 
 if __name__ == "__main__":
