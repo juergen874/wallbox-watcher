@@ -24,13 +24,14 @@ Eine modulare Python-Suite zur Überwachung, Regelung und Fernsteuerung von:
   - **$\ge$ 85% Speicher:** Automatische Empfehlung zum Starten des Ladens, um reichlich PV-Überschuss direkt ins Auto zu laden.
 - 🌤️ **Sonnenschein-Vorhersage (Zellertal):**  
   Tägliche Abfrage der erwarteten Sonnenstunden der nächsten 3 Tage über die Open-Meteo-API.
-- 🔘 **Direkte Hardware-Steuerung via Telegram:**  
+- 🔘 **Direkte Hardware-Steuerung via Telegram (max. 11 kW):**  
   Echte Leistungsregelung der Wallbox über Modbus TCP (Port 8899, Slave 3, Register 18):
-  - `[ ⏸️ Laden pausieren ]`: Setzt Ladelimit sofort auf `0 W` (stoppt Stromabgabe).
-  - `[ ▶️ Laden starten ]`: Setzt Ladelimit auf `15.000 W` zurück (gibt Laden frei).
-  - `[ 📊 Status aktualisieren ]`: Fragt Wallbox, Inverter, Fahrzeug und Wetter live ab.
-- 🔌 **Automatischer Stecker-Reset (Auto-Resume auf 15 kW):**  
-  Wird die Wallbox manuell pausiert (0 W), erkennt der Dienst über die Control-Pilot-Telemetrie (Register 57) direkt das Abziehen des Ladekabels am Fahrzeug. Die Wallbox wird **sofort beim Abziehen** automatisch wieder auf **15.0 kW** freigegeben, sodass beim nächsten Anstecken ohne Zutun direkt mit voller Leistung geladen wird.
+  - `[ ⏸️ Pause (0W) ]`: Setzt Ladelimit sofort auf `0 W` (stoppt Stromabgabe).
+  - Stufen-Buttons: Schnellauswahl für `4.1 kW`, `7.4 kW` und `11 kW` (maximales Limit).
+  - Schrittweise Regelung: `[ ➖ 1 kW ]` und `[ ➕ 1 kW ]` sowie `/set <Watt>` zur feinen Anpassung.
+  - `[ 📊 Status ]`: Fragt Wallbox, Inverter, Fahrzeug und Wetter live ab.
+- 🔒 **Kein ungewolltes Auto-Resume (Dauerhafte Leistungswahl):**  
+  Die gewählte Ladeleistung bzw. Pause bleibt auch beim Ausstecken des Ladekabels exakt so eingestellt, wie vom Nutzer gewünscht. Es erfolgt kein eigenmächtiges Zurücksetzen oder automatisches Hochregeln.
 - 🛡️ **Verbindungs- und API-Schutz:**  
   - Asynchrone Button-Quittierung (verhindert das Einfrieren der Telegram-App).
   - Automatischer Retry-Mechanismus und Socket-Bereinigung (`disconnect()`) für den Deye-Modbus-Port 8899.
@@ -151,13 +152,14 @@ A modular Python automation and monitoring suite for:
   - **$\ge$ 85% Storage:** Advisory alert recommending EV charging to consume solar surplus.
 - 🌤️ **Solar Forecast (Zellertal):**  
   Daily sunshine hours forecast for the upcoming 3 days via the Open-Meteo API.
-- 🔘 **Direct Hardware Control via Telegram:**  
-  Real power limit control via Modbus TCP (Port 8899, Slave 3, Register 18):
-  - `[ ⏸️ Laden pausieren ]`: Throttles charge limit immediately to `0 W` (suspends charging).
-  - `[ ▶️ Laden starten ]`: Restores charge limit to `15,000 W` (enables charging).
-  - `[ 📊 Status aktualisieren ]`: Live query of Wallbox, Inverter, Vehicle, and Weather.
-- 🔌 **Automatic Unplug Reset (Auto-Resume to 15 kW):**  
-  When charging is paused (0 W), the daemon detects the cable being disconnected via Control Pilot telemetry (Register 57) and **instantly restores the 15.0 kW limit**, ensuring the next plug-in charges at full power without manual actions.
+- 🔘 **Direct Hardware Control via Telegram (max. 11 kW):**  
+  Real-time power limit control via Modbus TCP (Port 8899, Slave 3, Register 18):
+  - `[ ⏸️ Pause (0W) ]`: Immediately sets charge limit to `0 W` (suspends charging).
+  - Quick power buttons: Preset buttons for `4.1 kW`, `7.4 kW`, and `11 kW` (maximum ceiling).
+  - Fine adjustment: `[ ➖ 1 kW ]`, `[ ➕ 1 kW ]`, and `/set <Watts>` command.
+  - `[ 📊 Status ]`: Live refresh of Wallbox, Inverter, Vehicle, and Weather.
+- 🔒 **Persistent Power Settings (No Auto-Resume):**  
+  The selected charging limit or pause state remains persistent even when unplugging the vehicle cable. No unexpected automatic resumption or resetting to full power occurs.
 - 🛡️ **Network & API Resilience:**  
   - Instant asynchronous callback acknowledgement for Telegram buttons.
   - Automatic retry and socket cleanup (`disconnect()`) for the Deye Modbus port 8899.
