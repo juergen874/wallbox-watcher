@@ -98,23 +98,24 @@ Für jede einzelne Komponente steht eine ausführliche Anleitung in **Deutsch** 
 
 ## 🛠️ Voraussetzungen & Installation
 
-### 1. Abhängigkeiten installieren
-```bash
-pip install requests pysolarmanv5
-```
-
-### 2. Repository klonen
+### 1. Repository klonen & vorbereiten
 ```bash
 git clone https://github.com/juergen874/wallbox-watcher.git
 cd wallbox-watcher
 chmod +x *.py *.sh deye-reader/*.py
 ```
 
-### 3. Telegram-Bot einrichten
+### 2. Abhängigkeiten installieren
 ```bash
-python3 wallbox_watcher.py --setup
+pip install -r requirements.txt
 ```
-*(Fragt interaktiv nach Bot-Token und Chat-/Gruppen-ID und sendet eine Bestätigung).*
+
+### 3. Konfiguration einrichten (Assistent)
+```bash
+python3 configure.py
+# oder: python3 wallbox_watcher.py --setup
+```
+*(Führt interaktiv durch Telegram-Token, IP-Adressen von Wallbox & Wechselrichter, Akkugröße und Wetter-Standort).*
 
 ### 4. Dienst starten
 ```bash
@@ -124,8 +125,8 @@ python3 wallbox_watcher.py --setup
 ---
 
 ## 🔒 Sicherheitshinweise
-- Dieses Repository enthält **keine privaten Tokens, Passwörter oder Chat-IDs**.
-- Konfigurations- und Tokendateien (`.wallbox_telegram.json`, `.corsa_tokens.json`) sind in `.gitignore` eingetragen und verbleiben ausschließlich lokal auf Ihrem Gerät.
+- Dieses Repository enthält **keine privaten Tokens, Passwörter, IP-Adressen oder Chat-IDs**.
+- Konfigurations- und Tokendateien (`config.json`, `.wallbox_telegram.json`, `.corsa_tokens.json`) sind in `.gitignore` eingetragen und verbleiben ausschließlich lokal auf Ihrem Gerät.
 
 ---
 

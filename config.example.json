@@ -1,0 +1,30 @@
+{
+  "telegram": {
+    "bot_token": "DEIN_TELEGRAM_BOT_TOKEN",
+    "chat_id": "DEINE_TELEGRAM_CHAT_ID"
+  },
+  "wallbox": {
+    "host": "192.168.188.130",
+    "serial": 1221073414,
+    "port": 8899,
+    "slave_id": 3
+  },
+  "inverter": {
+    "host": "192.168.188.128",
+    "serial": 1109501211,
+    "port": 8899,
+    "slave_id": 1
+  },
+  "vehicle": {
+    "target_soc": 66.0,
+    "battery_netto_kwh": 46.0,
+    "charging_phases": 1,
+    "charging_efficiency": 0.90,
+    "fixed_1p_power_w": 5000.0
+  },
+  "weather": {
+    "location_name": "Zellertal",
+    "latitude": 49.65,
+    "longitude": 8.14
+  }
+}

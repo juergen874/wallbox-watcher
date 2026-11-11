@@ -25,7 +25,9 @@ import base64
 from datetime import datetime, timedelta
 import threading
 
-sys.path.append("/data/data/com.termux/files/home")
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
 
 try:
     import corsa_status
@@ -42,21 +44,87 @@ try:
 except ImportError:
     HAS_SOLARMAN = False
 
-CONFIG_FILE = os.path.expanduser("~/.wallbox_telegram.json")
-WB_HOST = "192.168.188.130"
-WB_SERIAL = 1221073414
-INV_HOST = "192.168.188.128"
-INV_SERIAL = 1109501211
-TARGET_SOC = 66.0
-BATTERY_NETTO_KWH = 46.0
-CHARGING_EFFICIENCY = 0.90
-# 1-phasiger On-Board-Lader (Opel Corsa Electric lädt 1-phasig bei 15kW Limit mit 1/3 = 5.0 kW / ~21.7A)
-CHARGING_PHASES = 1
-FIXED_1P_CHARGING_POWER_W = 5000.0  # 15 kW / 3 = exakt 5 kW echte Wirkleistung am Wechselrichter
+CONFIG_JSON_FILE = os.path.join(BASE_DIR, "config.json")
+LEGACY_CONFIG_FILE = os.path.expanduser("~/.wallbox_telegram.json")
 
-# Wetter-Koordinaten für Zellertal (Donnersbergkreis)
-ZELLERTAL_LAT = 49.65
-ZELLERTAL_LON = 8.14
+def load_app_config():
+    cfg = {
+        "bot_token": "",
+        "chat_id": "",
+        "wb_host": "192.168.188.130",
+        "wb_serial": 1221073414,
+        "inv_host": "192.168.188.128",
+        "inv_serial": 1109501211,
+        "target_soc": 66.0,
+        "battery_netto_kwh": 46.0,
+        "charging_efficiency": 0.90,
+        "charging_phases": 1,
+        "fixed_1p_power_w": 5000.0,
+        "location_name": "Zellertal",
+        "latitude": 49.65,
+        "longitude": 8.14
+    }
+    # 1. Versuche config.json
+    if os.path.exists(CONFIG_JSON_FILE):
+        try:
+            with open(CONFIG_JSON_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if "telegram" in data:
+                    cfg["bot_token"] = data["telegram"].get("bot_token", cfg["bot_token"])
+                    cfg["chat_id"] = str(data["telegram"].get("chat_id", cfg["chat_id"]))
+                if "wallbox" in data:
+                    cfg["wb_host"] = data["wallbox"].get("host", cfg["wb_host"])
+                    cfg["wb_serial"] = int(data["wallbox"].get("serial", cfg["wb_serial"]))
+                if "inverter" in data:
+                    cfg["inv_host"] = data["inverter"].get("host", cfg["inv_host"])
+                    cfg["inv_serial"] = int(data["inverter"].get("serial", cfg["inv_serial"]))
+                if "vehicle" in data:
+                    cfg["vehicle_type"] = data["vehicle"].get("type", "none")
+                    cfg["target_soc"] = float(data["vehicle"].get("target_soc", cfg["target_soc"]))
+                    cfg["battery_netto_kwh"] = float(data["vehicle"].get("battery_netto_kwh", cfg["battery_netto_kwh"]))
+                    cfg["charging_phases"] = int(data["vehicle"].get("charging_phases", cfg["charging_phases"]))
+                    cfg["charging_efficiency"] = float(data["vehicle"].get("charging_efficiency", cfg["charging_efficiency"]))
+                    cfg["fixed_1p_power_w"] = float(data["vehicle"].get("fixed_1p_power_w", cfg["fixed_1p_power_w"]))
+                if "weather" in data:
+                    cfg["location_name"] = data["weather"].get("location_name", cfg["location_name"])
+                    cfg["latitude"] = float(data["weather"].get("latitude", cfg["latitude"]))
+                    cfg["longitude"] = float(data["weather"].get("longitude", cfg["longitude"]))
+        except Exception:
+            pass
+
+    # Fallback für Fahrzeugtyp
+    if "vehicle_type" not in cfg:
+        cfg["vehicle_type"] = "opel" if os.path.exists(os.path.expanduser("~/.corsa_tokens.json")) else "none"
+
+    # 2. Fallback auf ~/.wallbox_telegram.json falls Bot-Token noch fehlt
+    if not cfg["bot_token"] and os.path.exists(LEGACY_CONFIG_FILE):
+        try:
+            with open(LEGACY_CONFIG_FILE, "r", encoding="utf-8") as f:
+                leg = json.load(f)
+                cfg["bot_token"] = leg.get("bot_token", cfg["bot_token"])
+                cfg["chat_id"] = str(leg.get("chat_id", cfg["chat_id"]))
+        except Exception:
+            pass
+
+    return cfg
+
+APP_CFG = load_app_config()
+CONFIG_FILE = CONFIG_JSON_FILE if os.path.exists(CONFIG_JSON_FILE) else LEGACY_CONFIG_FILE
+
+WB_HOST = APP_CFG["wb_host"]
+WB_SERIAL = APP_CFG["wb_serial"]
+INV_HOST = APP_CFG["inv_host"]
+INV_SERIAL = APP_CFG["inv_serial"]
+VEHICLE_TYPE = APP_CFG.get("vehicle_type", "none")
+TARGET_SOC = APP_CFG["target_soc"]
+BATTERY_NETTO_KWH = APP_CFG["battery_netto_kwh"]
+CHARGING_EFFICIENCY = APP_CFG["charging_efficiency"]
+CHARGING_PHASES = APP_CFG["charging_phases"]
+FIXED_1P_CHARGING_POWER_W = APP_CFG["fixed_1p_power_w"]
+
+WEATHER_LOCATION = APP_CFG["location_name"]
+WEATHER_LAT = APP_CFG["latitude"]
+WEATHER_LON = APP_CFG["longitude"]
 
 # Caches
 CARS_CACHE = {"data": [], "timestamp": 0}
@@ -323,10 +391,10 @@ def get_weather_forecast_zellertal():
         return WEATHER_CACHE["text"]
 
     url = (
-        f"https://api.open-meteo.com/v1/forecast?latitude={ZELLERTAL_LAT}&longitude={ZELLERTAL_LON}"
+        f"https://api.open-meteo.com/v1/forecast?latitude={WEATHER_LAT}&longitude={WEATHER_LON}"
         "&daily=weathercode,sunshine_duration,temperature_2m_max,precipitation_probability_max,cloud_cover_mean&timezone=Europe%2FBerlin"
     )
-    req = urllib.request.Request(url, headers={"User-Agent": "ZellertalSolar/1.0"})
+    req = urllib.request.Request(url, headers={"User-Agent": "WallboxSolar/1.0"})
     try:
         with urllib.request.urlopen(req, timeout=4) as resp:
             data = json.loads(resp.read().decode())
@@ -338,7 +406,7 @@ def get_weather_forecast_zellertal():
             rain_probs = daily.get("precipitation_probability_max", [])
             clouds = daily.get("cloud_cover_mean", [])
 
-            lines = ["🌤️ *Wetter- & Solarprognose Zellertal:*"]
+            lines = [f"🌤️ *Wetter- & Solarprognose ({WEATHER_LOCATION}):*"]
             days_de = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
             
             # Die nächsten 3 Tage anzeigen
@@ -432,40 +500,49 @@ def format_full_status_message(header="📊 *Aktueller Energie- & Ladestatus*", 
     else:
         lines.append("   • _Wechselrichter-Daten temporär nicht erreichbar_")
 
-    # Fahrzeuge
-    lines.append("\n🚘 *Fahrzeuge (Opel Corsa Electric):*")
-    active_charging_car = None
-    if cars:
-        for c in cars:
-            plug = "🔌 Eingesteckt" if c["plugged"] else "⚪ Nicht eingesteckt"
-            lines.append(f"   *{c['label']}:* {c['soc']}% (Restreichweite ~{c['autonomy']} km) | {plug}")
-            if c["plugged"] and wb["total_w"] > 50:
-                active_charging_car = c
+    # Fahrzeuge / Ladeinformation
+    if VEHICLE_TYPE == "opel":
+        lines.append("\n🚘 *Fahrzeuge (Opel Corsa Electric):*")
+        active_charging_car = None
+        if cars:
+            for c in cars:
+                plug = "🔌 Eingesteckt" if c["plugged"] else "⚪ Nicht eingesteckt"
+                lines.append(f"   *{c['label']}:* {c['soc']}% (Restreichweite ~{c['autonomy']} km) | {plug}")
+                if c["plugged"] and wb["total_w"] > 50:
+                    active_charging_car = c
+        else:
+            lines.append("   • _Fahrzeugdaten werden geladen..._")
+
+        # Prognose auf 66% & Langzeit (Opel-Daten)
+        if active_charging_car and wb["total_w"] > 50:
+            base_time = parse_opel_timestamp(active_charging_car.get("updated_at"))
+            time_str_opel = base_time.strftime("%H:%M Uhr")
+            mins, target_clock, needed_kwh = calculate_time_to_66(active_charging_car["soc"], wb["total_w"], base_time=base_time)
+            lines.append(f"\n🎯 *Ladezeitprognose (Basis Opel: {time_str_opel}):*")
+            if mins == 0:
+                lines.append(f"   ✅ Ziel von {TARGET_SOC:.0f}% ist bereits erreicht!")
+            elif mins:
+                h, m = mins // 60, mins % 60
+                dur_str = f"{h}h {m}m" if h > 0 else f"{m} Minuten"
+                lines.append(f"   • Ziel {TARGET_SOC:.0f}%: ca. *{dur_str}* (um ~*{target_clock}*) | ~*{needed_kwh:.1f} kWh*")
+
+            # Langzeitprognose bis 100% (aus Opel Bordcomputer-Daten)
+            rem_str = active_charging_car.get("remaining_time")
+            rate_val = active_charging_car.get("rate")
+            rem_mins = parse_iso_duration(rem_str)
+            if rem_mins > 0:
+                rh, rm = rem_mins // 60, rem_mins % 60
+                full_clock = (base_time + timedelta(minutes=rem_mins)).strftime("%H:%M Uhr")
+                rate_info = f" ({rate_val} km/h)" if rate_val else ""
+                lines.append(f"   • Voll (100%): ca. *{rh}h {rm}m*{rate_info} (um ~*{full_clock}*)")
     else:
-        lines.append("   • _Fahrzeugdaten werden geladen..._")
-
-    # Prognose auf 66% & Langzeit (Opel-Daten)
-    if active_charging_car and wb["total_w"] > 50:
-        base_time = parse_opel_timestamp(active_charging_car.get("updated_at"))
-        time_str_opel = base_time.strftime("%H:%M Uhr")
-        mins, target_clock, needed_kwh = calculate_time_to_66(active_charging_car["soc"], wb["total_w"], base_time=base_time)
-        lines.append(f"\n🎯 *Ladezeitprognose (Basis Opel: {time_str_opel}):*")
-        if mins == 0:
-            lines.append(f"   ✅ Ziel von {TARGET_SOC:.0f}% ist bereits erreicht!")
-        elif mins:
-            h, m = mins // 60, mins % 60
-            dur_str = f"{h}h {m}m" if h > 0 else f"{m} Minuten"
-            lines.append(f"   • Ziel {TARGET_SOC:.0f}%: ca. *{dur_str}* (um ~*{target_clock}*) | ~*{needed_kwh:.1f} kWh*")
-
-        # Langzeitprognose bis 100% (aus Opel Bordcomputer-Daten)
-        rem_str = active_charging_car.get("remaining_time")
-        rate_val = active_charging_car.get("rate")
-        rem_mins = parse_iso_duration(rem_str)
-        if rem_mins > 0:
-            rh, rm = rem_mins // 60, rem_mins % 60
-            full_clock = (base_time + timedelta(minutes=rem_mins)).strftime("%H:%M Uhr")
-            rate_info = f" ({rate_val} km/h)" if rate_val else ""
-            lines.append(f"   • Voll (100%): ca. *{rh}h {rm}m*{rate_info} (um ~*{full_clock}*)")
+        # Universeller Modus (ohne Fahrzeug-Cloud)
+        if wb["total_w"] > 50:
+            lines.append("\n🚘 *Fahrzeug:* 🟢 Lädt über Wallbox")
+        elif wb.get("plugged"):
+            lines.append("\n🚘 *Fahrzeug:* 🔌 Angesteckt (Bereit)")
+        else:
+            lines.append("\n🚘 *Fahrzeug:* ⚪ Nicht angesteckt")
 
     # Wetter / Sonnenschein
     lines.append(f"\n{weather}")
@@ -715,12 +792,16 @@ def monitor_wallbox_and_battery_loop():
 
 def main():
     if "--setup" in sys.argv:
-        print("=== TELEGRAM BOT EINRICHTUNG ===")
-        tok = input("Telegram Bot-Token: ").strip()
-        cid = input("Chat-ID / Gruppen-ID: ").strip()
-        save_config({"bot_token": tok, "chat_id": cid})
-        print("✓ Gespeichert.")
-        send_telegram("👋 *Wallbox Watcher eingerichtet!*", reply_markup=get_inline_keyboard())
+        try:
+            import configure
+            configure.main()
+        except Exception:
+            print("=== TELEGRAM BOT EINRICHTUNG ===")
+            tok = input("Telegram Bot-Token: ").strip()
+            cid = input("Chat-ID / Gruppen-ID: ").strip()
+            save_config({"bot_token": tok, "chat_id": cid})
+            print("✓ Gespeichert.")
+            send_telegram("👋 *Wallbox Watcher eingerichtet!*", reply_markup=get_inline_keyboard())
         sys.exit(0)
 
     # 1. Telegram Bot Polling Thread
